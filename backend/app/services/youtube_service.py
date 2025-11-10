@@ -1,7 +1,8 @@
 from googleapiclient.discovery import build
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
 import isodate
+from ..constants import UnifiedCategory, get_youtube_category_string
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,8 @@ class YouTubeService:
     def get_trending_videos(
         self,
         country_code: str = "US",
-        max_results: int = 10
+        max_results: int = 10,
+        category: Optional[UnifiedCategory] = None
     ) -> List[Dict[str, Any]]:
         """
         Fetch trending videos from YouTube for a specific region.
@@ -24,18 +26,30 @@ class YouTubeService:
         Args:
             country_code: Two-letter country code (e.g., 'US', 'MY', 'IN')
             max_results: Maximum number of videos to fetch (default: 10)
+            category: Optional unified category to filter videos
 
         Returns:
             List of trending videos with comprehensive metadata
         """
         try:
-            request = self.youtube.videos().list(
-                part="snippet,statistics,contentDetails",
-                chart="mostPopular",
-                regionCode=country_code,
-                maxResults=max_results
-            )
+            # Build request parameters
+            request_params = {
+                "part": "snippet,statistics,contentDetails",
+                "chart": "mostPopular",
+                "regionCode": country_code,
+                "maxResults": max_results
+            }
 
+            # Add category filter if provided
+            if category:
+                category_ids = get_youtube_category_string(category)
+                if category_ids:
+                    request_params["videoCategoryId"] = category_ids
+                    logger.info(f"Filtering YouTube videos by category: {category.value} (IDs: {category_ids})")
+                else:
+                    logger.warning(f"Category {category.value} not supported by YouTube, fetching all trending videos")
+
+            request = self.youtube.videos().list(**request_params)
             response = request.execute()
             videos = self._extract_youtube_trends(response)
 

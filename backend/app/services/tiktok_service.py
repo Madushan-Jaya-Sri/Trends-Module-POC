@@ -1,6 +1,7 @@
 from apify_client import ApifyClient
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
+from ..constants import UnifiedCategory, get_tiktok_category
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,8 @@ class TikTokService:
         self,
         country_code: str = "MY",
         results_per_page: int = 10,
-        time_range: str = "7"
+        time_range: str = "7",
+        category: Optional[UnifiedCategory] = UnifiedCategory.SHOPPING
     ) -> Dict[str, List[Dict[str, Any]]]:
         """
         Fetch trending TikTok data including hashtags, creators, sounds, and videos.
@@ -25,11 +27,21 @@ class TikTokService:
             country_code: Two-letter country code (e.g., 'MY', 'US', 'IN')
             results_per_page: Number of results per category
             time_range: Time range in days (default: "7")
+            category: Unified category to filter trending content (defaults to Shopping)
 
         Returns:
             Dictionary with separate lists for hashtags, creators, sounds, and videos
         """
         try:
+            # Get TikTok-specific industry name from unified category
+            industry_name = get_tiktok_category(category)
+
+            if not industry_name:
+                logger.warning(f"Category {category.value} not supported by TikTok, using default (Apparel & Accessories)")
+                industry_name = "Apparel & Accessories"
+            else:
+                logger.info(f"Filtering TikTok trends by category: {category.value} -> {industry_name}")
+
             run_input = {
                 "adsScrapeHashtags": True,
                 "resultsPerPage": results_per_page,
@@ -38,6 +50,7 @@ class TikTokService:
                 "adsNewOnBoard": True,
                 "adsScrapeSounds": True,
                 "adsRankType": "popular",
+                "adsHashtagIndustry": industry_name,
                 "adsApprovedForBusinessUse": False,
                 "adsScrapeCreators": True,
                 "adsSortCreatorsBy": "follower",

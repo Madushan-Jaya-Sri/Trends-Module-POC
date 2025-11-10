@@ -1,7 +1,8 @@
 from serpapi import GoogleSearch
 from datetime import datetime, timezone
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
+from ..constants import UnifiedCategory, get_google_trends_category
 
 logger = logging.getLogger(__name__)
 
@@ -12,12 +13,13 @@ class GoogleTrendsService:
     def __init__(self, api_key: str):
         self.api_key = api_key
 
-    def get_trending_now(self, country_code: str = "US") -> List[Dict[str, Any]]:
+    def get_trending_now(self, country_code: str = "US", category: Optional[UnifiedCategory] = None) -> List[Dict[str, Any]]:
         """
         Fetch trending searches from Google Trends for a specific country.
 
         Args:
             country_code: Two-letter country code (e.g., 'US', 'LK', 'IN')
+            category: Optional unified category to filter trends
 
         Returns:
             List of trending searches with enhanced metadata
@@ -28,6 +30,15 @@ class GoogleTrendsService:
                 "geo": country_code,
                 "api_key": self.api_key
             }
+
+            # Add category filter if provided
+            if category:
+                category_id = get_google_trends_category(category)
+                if category_id:
+                    params["category_id"] = category_id
+                    logger.info(f"Filtering Google Trends by category: {category.value} (ID: {category_id})")
+                else:
+                    logger.warning(f"Category {category.value} not supported by Google Trends, fetching all trends")
 
             search = GoogleSearch(params)
             results = search.get_dict()

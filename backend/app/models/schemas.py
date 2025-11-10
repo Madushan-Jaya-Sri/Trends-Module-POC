@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
+from ..constants import UnifiedCategory
 
 
 # ======================= GOOGLE TRENDS SCHEMAS =======================
@@ -9,6 +10,10 @@ class GoogleTrendsRequest(BaseModel):
     country_code: str = Field(
         default="US",
         description="Two-letter country code (e.g., 'US', 'IN', 'LK')"
+    )
+    category: Optional[UnifiedCategory] = Field(
+        default=None,
+        description="Optional category filter for trending searches"
     )
 
 
@@ -37,6 +42,10 @@ class TikTokRequest(BaseModel):
     time_range: str = Field(
         default="7",
         description="Time range in days"
+    )
+    category: Optional[UnifiedCategory] = Field(
+        default=UnifiedCategory.SHOPPING,
+        description="Category filter for trending content (defaults to Shopping/Apparel & Accessories)"
     )
 
 
@@ -111,6 +120,10 @@ class YouTubeRequest(BaseModel):
         ge=1,
         le=50,
         description="Maximum number of videos to fetch"
+    )
+    category: Optional[UnifiedCategory] = Field(
+        default=None,
+        description="Optional category filter for trending videos"
     )
 
 

@@ -92,6 +92,7 @@ async def get_google_trends(request: GoogleTrendsRequest = Body(...)):
 
     Request body:
     - **country_code**: Two-letter country code (e.g., 'US', 'IN', 'LK')
+    - **category**: Optional unified category to filter trends
 
     Returns trending searches with timestamps, search volumes, and trending durations.
     """
@@ -99,9 +100,12 @@ async def get_google_trends(request: GoogleTrendsRequest = Body(...)):
         if not google_trends_service:
             raise HTTPException(status_code=500, detail="Google Trends service not initialized")
 
-        logger.info(f"Fetching Google Trends for country: {request.country_code}")
+        logger.info(f"Fetching Google Trends for country: {request.country_code}, category: {request.category}")
 
-        trends = google_trends_service.get_trending_now(country_code=request.country_code)
+        trends = google_trends_service.get_trending_now(
+            country_code=request.country_code,
+            category=request.category
+        )
 
         return GoogleTrendsResponse(
             country=request.country_code,
@@ -124,6 +128,7 @@ async def get_tiktok_trends(request: TikTokRequest = Body(...)):
     - **country_code**: Two-letter country code (e.g., 'MY', 'US', 'IN')
     - **results_per_page**: Number of results per category (default: 10)
     - **time_range**: Time range in days (default: "7")
+    - **category**: Unified category to filter trending content (default: Shopping)
 
     Returns categorized trending data from TikTok.
     """
@@ -131,12 +136,13 @@ async def get_tiktok_trends(request: TikTokRequest = Body(...)):
         if not tiktok_service:
             raise HTTPException(status_code=500, detail="TikTok service not initialized")
 
-        logger.info(f"Fetching TikTok trends for country: {request.country_code}")
+        logger.info(f"Fetching TikTok trends for country: {request.country_code}, category: {request.category}")
 
         data = tiktok_service.get_trending_data(
             country_code=request.country_code,
             results_per_page=request.results_per_page,
-            time_range=request.time_range
+            time_range=request.time_range,
+            category=request.category
         )
 
         return TikTokResponse(
@@ -167,6 +173,7 @@ async def get_youtube_trends(request: YouTubeRequest = Body(...)):
     Request body:
     - **country_code**: Two-letter country code (e.g., 'US', 'MY', 'IN')
     - **max_results**: Maximum number of videos to fetch (default: 10, max: 50)
+    - **category**: Optional unified category to filter videos
 
     Returns trending YouTube videos with comprehensive metadata.
     """
@@ -174,11 +181,12 @@ async def get_youtube_trends(request: YouTubeRequest = Body(...)):
         if not youtube_service:
             raise HTTPException(status_code=500, detail="YouTube service not initialized")
 
-        logger.info(f"Fetching YouTube trends for country: {request.country_code}")
+        logger.info(f"Fetching YouTube trends for country: {request.country_code}, category: {request.category}")
 
         videos = youtube_service.get_trending_videos(
             country_code=request.country_code,
-            max_results=request.max_results
+            max_results=request.max_results,
+            category=request.category
         )
 
         return YouTubeResponse(
