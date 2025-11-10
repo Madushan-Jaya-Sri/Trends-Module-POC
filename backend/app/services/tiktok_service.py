@@ -1,31 +1,40 @@
 from apify_client import ApifyClient
-from typing import Dict, List, Any
+from typing import List, Dict, Any
 import logging
 
 logger = logging.getLogger(__name__)
 
 
 class TikTokService:
+    """Service for fetching TikTok trending data using Apify"""
+
     def __init__(self, api_key: str):
         self.client = ApifyClient(api_key)
-        
-    def get_trending_data(self, country_code: str = "US", results_per_page: int = 10) -> Dict[str, Any]:
+        self.actor_id = "sDvA9jM4WRTDX4Syr"
+
+    def get_trending_data(
+        self,
+        country_code: str = "MY",
+        results_per_page: int = 10,
+        time_range: str = "7"
+    ) -> Dict[str, List[Dict[str, Any]]]:
         """
-        Fetch trending TikTok data for a specific country
+        Fetch trending TikTok data including hashtags, creators, sounds, and videos.
 
         Args:
-            country_code: Two-letter country code (e.g., 'US', 'GB', 'IN')
-            results_per_page: Number of results to fetch
+            country_code: Two-letter country code (e.g., 'MY', 'US', 'IN')
+            results_per_page: Number of results per category
+            time_range: Time range in days (default: "7")
 
         Returns:
-            Dictionary containing hashtags, videos, creators, and sounds
+            Dictionary with separate lists for hashtags, creators, sounds, and videos
         """
         try:
             run_input = {
                 "adsScrapeHashtags": True,
                 "resultsPerPage": results_per_page,
                 "adsCountryCode": country_code,
-                "adsTimeRange": "7",
+                "adsTimeRange": time_range,
                 "adsNewOnBoard": True,
                 "adsScrapeSounds": True,
                 "adsRankType": "popular",
@@ -36,81 +45,124 @@ class TikTokService:
                 "adsSortVideosBy": "vv",
             }
 
-            logger.info(f"Starting TikTok trends scrape for country: {country_code}")
-            run = self.client.actor("sDvA9jM4WRTDX4Syr").call(run_input=run_input)
+            # Run the Actor and wait for it to finish
+            run = self.client.actor(self.actor_id).call(run_input=run_input)
 
-            # Fetch results
-            results = {
-                "hashtags": [],
-                "videos": [],
-                "creators": [],
-                "sounds": []
-            }
+            # Fetch results from dataset
+            data_items = list(self.client.dataset(run["defaultDatasetId"]).iterate_items())
 
-            # Categorize items based on their 'type' field
-            for item in self.client.dataset(run["defaultDatasetId"]).iterate_items():
-                item_type = item.get("type", "").lower()
+            # Extract and categorize the data
+            extracted_data = self._extract_tiktok_data(data_items)
 
-                if item_type == "hashtag":
-                    results["hashtags"].append(item)
-                elif item_type == "video":
-                    results["videos"].append(item)
-                elif item_type == "creator":
-                    results["creators"].append(item)
-                elif item_type == "sound":
-                    results["sounds"].append(item)
-                else:
-                    logger.warning(f"Unknown TikTok item type: {item_type}")
+            logger.info(
+                f"Fetched TikTok data for {country_code}: "
+                f"{len(extracted_data['hashtags'])} hashtags, "
+                f"{len(extracted_data['creators'])} creators, "
+                f"{len(extracted_data['sounds'])} sounds, "
+                f"{len(extracted_data['videos'])} videos"
+            )
 
-            logger.info(f"TikTok scrape complete. Hashtags: {len(results['hashtags'])}, "
-                       f"Videos: {len(results['videos'])}, Creators: {len(results['creators'])}, "
-                       f"Sounds: {len(results['sounds'])}")
-
-            return results
+            return extracted_data
 
         except Exception as e:
-            logger.error(f"Error fetching TikTok trends: {str(e)}", exc_info=True)
-            return {"hashtags": [], "videos": [], "creators": [], "sounds": [], "error": str(e)}
-    
-    def extract_topics_from_tiktok(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+            logger.error(f"Error fetching TikTok data: {str(e)}")
+            return {
+                "hashtags": [],
+                "creators": [],
+                "sounds": [],
+                "videos": []
+            }
+
+    def _extract_tiktok_data(self, datalist: List[Dict]) -> Dict[str, List[Dict[str, Any]]]:
         """
-        Extract topics and keywords from TikTok data
+        Extract and categorize TikTok data by type.
+
+        Args:
+            datalist: Raw data from Apify
+
+        Returns:
+            Categorized data dictionary
         """
-        topics = []
+        hashtags = []
+        creators = []
+        sounds = []
+        videos = []
 
-        # Extract from hashtags (field name is 'name')
-        for hashtag in data.get("hashtags", [])[:20]:  # Top 20 hashtags
-            name = hashtag.get("name", "")
-            if name:
-                topics.append({
-                    "topic": name.replace("#", ""),
-                    "source": "hashtag",
-                    "views": hashtag.get("viewCount", 0),
-                    "videoCount": hashtag.get("videoCount", 0),
-                    "rank": hashtag.get("rank", 999),
-                    "url": hashtag.get("url", "")
+        for item in datalist:
+            item_type = item.get("type")
+
+            # ===================================== HASHTAG =====================================
+            if item_type == "hashtag":
+                related_creators = []
+                for c in item.get("relatedCreators", []):
+                    related_creators.append({
+                        "nickName": c.get("nickName"),
+                        "avatar": c.get("avatar"),
+                        "profileUrl": c.get("profileUrl")
+                    })
+
+                hashtags.append({
+                    "name": item.get("name"),
+                    "countryCode": item.get("countryCode"),
+                    "rank": item.get("rank"),
+                    "trendingHistogram": item.get("trendingHistogram", []),
+                    "url": item.get("url"),
+                    "videoCount": item.get("videoCount"),
+                    "viewCount": item.get("viewCount"),
+                    "industryName": item.get("industryName"),
+                    "relatedCreators": related_creators
                 })
 
-        # Extract from videos (field name is 'name')
-        for video in data.get("videos", [])[:20]:  # Top 20 videos
-            name = video.get("name", "")
-            if name:
-                topics.append({
-                    "topic": name[:100],  # Limit length
-                    "source": "video",
-                    "rank": video.get("rank", 999),
-                    "url": video.get("url", "")
+            # ===================================== CREATOR =====================================
+            elif item_type == "creator":
+                related_videos = []
+                for v in item.get("relatedVideos", []):
+                    related_videos.append({
+                        "webVideoUrl": v.get("webVideoUrl"),
+                        "coverUrl": v.get("coverUrl"),
+                        "viewCount": v.get("viewCount"),
+                        "likedCount": v.get("likedCount"),
+                        "createTime": v.get("createTime")
+                    })
+
+                creators.append({
+                    "avatar": item.get("avatar"),
+                    "countryCode": item.get("countryCode"),
+                    "followerCount": item.get("followerCount"),
+                    "likedCount": item.get("likedCount"),
+                    "name": item.get("name"),
+                    "url": item.get("url"),
+                    "rank": item.get("rank"),
+                    "relatedVideos": related_videos
                 })
 
-        # Extract from sounds (field name is 'name')
-        for sound in data.get("sounds", [])[:10]:  # Top 10 sounds
-            name = sound.get("name", "")
-            if name:
-                topics.append({
-                    "topic": name[:100],
-                    "source": "sound",
-                    "rank": sound.get("rank", 999),
-                    "url": sound.get("url", "")
+            # ===================================== SOUND =====================================
+            elif item_type == "sound":
+                sounds.append({
+                    "name": item.get("name"),
+                    "countryCode": item.get("countryCode"),
+                    "rank": item.get("rank"),
+                    "trendingHistogram": item.get("trendingHistogram", []),
+                    "url": item.get("url"),
+                    "coverUrl": item.get("coverUrl"),
+                    "durationSec": item.get("durationSec"),
+                    "author": item.get("author")
                 })
 
-        return topics
+            # ===================================== VIDEO =====================================
+            elif item_type == "video":
+                videos.append({
+                    "countryCode": item.get("countryCode"),
+                    "coverUrl": item.get("coverUrl"),
+                    "durationSec": item.get("durationSec"),
+                    "rank": item.get("rank"),
+                    "name": item.get("name"),
+                    "url": item.get("url")
+                })
+
+        return {
+            "hashtags": hashtags,
+            "creators": creators,
+            "sounds": sounds,
+            "videos": videos
+        }

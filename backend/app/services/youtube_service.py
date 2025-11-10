@@ -1,88 +1,131 @@
 from googleapiclient.discovery import build
-from typing import Dict, List, Any
+from typing import List, Dict, Any
 import logging
-from datetime import datetime
+import isodate
 
 logger = logging.getLogger(__name__)
 
 
 class YouTubeService:
+    """Service for fetching YouTube trending videos"""
+
     def __init__(self, api_key: str):
+        self.api_key = api_key
         self.youtube = build('youtube', 'v3', developerKey=api_key)
-    
-    def get_trending_videos(self, region_code: str = "US", max_results: int = 50) -> List[Dict[str, Any]]:
+
+    def get_trending_videos(
+        self,
+        country_code: str = "US",
+        max_results: int = 10
+    ) -> List[Dict[str, Any]]:
         """
-        Fetch trending YouTube videos for a specific region
-        
+        Fetch trending videos from YouTube for a specific region.
+
         Args:
-            region_code: Two-letter region code (e.g., 'US', 'GB', 'IN')
-            max_results: Number of videos to fetch (max 50 per request)
-            
+            country_code: Two-letter country code (e.g., 'US', 'MY', 'IN')
+            max_results: Maximum number of videos to fetch (default: 10)
+
         Returns:
-            List of trending videos with metadata
+            List of trending videos with comprehensive metadata
         """
         try:
-            logger.info(f"Fetching YouTube trending videos for region: {region_code}")
-            
             request = self.youtube.videos().list(
                 part="snippet,statistics,contentDetails",
                 chart="mostPopular",
-                regionCode=region_code,
+                regionCode=country_code,
                 maxResults=max_results
             )
-            
+
             response = request.execute()
-            
-            videos = []
-            for item in response.get('items', []):
-                video_data = {
-                    'id': item['id'],
-                    'title': item['snippet']['title'],
-                    'description': item['snippet']['description'],
-                    'channel': item['snippet']['channelTitle'],
-                    'published_at': item['snippet']['publishedAt'],
-                    'thumbnail': item['snippet']['thumbnails']['high']['url'],
-                    'category': item['snippet'].get('categoryId', 'Unknown'),
-                    'tags': item['snippet'].get('tags', []),
-                    'views': int(item['statistics'].get('viewCount', 0)),
-                    'likes': int(item['statistics'].get('likeCount', 0)),
-                    'comments': int(item['statistics'].get('commentCount', 0)),
-                    'url': f"https://www.youtube.com/watch?v={item['id']}"
-                }
-                videos.append(video_data)
-            
-            logger.info(f"Fetched {len(videos)} trending YouTube videos")
+            videos = self._extract_youtube_trends(response)
+
+            logger.info(f"Fetched {len(videos)} trending YouTube videos for {country_code}")
             return videos
-            
+
         except Exception as e:
-            logger.error(f"Error fetching YouTube trends: {str(e)}")
+            logger.error(f"Error fetching YouTube data: {str(e)}")
             return []
-    
-    def extract_topics_from_youtube(self, videos: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+
+    def _extract_youtube_trends(self, response: Dict) -> List[Dict[str, Any]]:
         """
-        Extract topics and keywords from YouTube videos
+        Extract key attributes from YouTube API response for trend analysis.
+
+        Args:
+            response: Raw response from YouTube API
+
+        Returns:
+            List of videos with enhanced metadata
         """
-        topics = []
-        
-        for video in videos[:30]:  # Top 30 videos
-            # Add title as topic
-            topics.append({
-                "topic": video['title'],
-                "source": "video_title",
-                "views": video['views'],
-                "likes": video['likes'],
-                "comments": video['comments'],
-                "url": video['url'],
-                "published_at": video['published_at']
-            })
-            
-            # Add tags as topics
-            for tag in video.get('tags', [])[:5]:  # Top 5 tags per video
-                topics.append({
-                    "topic": tag,
-                    "source": "tag",
-                    "views": video['views'],
-                    "url": video['url']
-                })
-        
-        return topics
+        videos = []
+
+        for item in response.get('items', []):
+            snippet = item.get('snippet', {})
+            content_details = item.get('contentDetails', {})
+            stats = item.get('statistics', {})
+
+            # Extract thumbnail URL (standard if available, fallback to high)
+            thumbnails = snippet.get('thumbnails', {})
+            thumbnail_url_standard = (
+                thumbnails.get('standard', {}).get('url') or
+                thumbnails.get('high', {}).get('url') or
+                ''
+            )
+
+            # Duration: Convert ISO 8601 duration to seconds (e.g., 'PT3M22S' -> 202)
+            try:
+                duration_sec = int(
+                    isodate.parse_duration(
+                        content_details.get('duration', 'PT0S')
+                    ).total_seconds()
+                )
+            except Exception:
+                duration_sec = 0
+
+            # Tags as list (or empty list)
+            tags = snippet.get('tags', [])
+
+            # Build the dictionary with all relevant attributes
+            video_data = {
+                # Core identifiers
+                "kind": item.get('kind', ''),
+                "id": item.get('id', ''),
+
+                # Publishing and channel info
+                "publishedAt": snippet.get('publishedAt', ''),
+                "channelId": snippet.get('channelId', ''),
+                "channelTitle": snippet.get('channelTitle', ''),
+
+                # Content details
+                "title": snippet.get('title', ''),
+                "description": snippet.get('description', ''),
+                "tags": tags,
+                "categoryId": snippet.get('categoryId', ''),
+                "defaultLanguage": snippet.get('defaultLanguage', '') or snippet.get('defaultAudioLanguage', ''),
+                "liveBroadcastContent": snippet.get('liveBroadcastContent', 'none'),
+
+                # Thumbnails and visuals (for UI)
+                "thumbnail_url_standard": thumbnail_url_standard,
+
+                # Video properties
+                "duration_sec": duration_sec,
+                "dimension": content_details.get('dimension', ''),
+                "definition": content_details.get('definition', ''),
+                "caption": content_details.get('caption', 'false') == 'true',
+                "licensedContent": content_details.get('licensedContent', False),
+                "projection": content_details.get('projection', ''),
+
+                # Statistics for trends (convert to int for analysis)
+                "viewCount": int(stats.get('viewCount', 0)),
+                "likeCount": int(stats.get('likeCount', 0)),
+                "favoriteCount": int(stats.get('favoriteCount', 0)),
+                "commentCount": int(stats.get('commentCount', 0)),
+
+                # Additional useful fields
+                "localized_title": snippet.get('localized', {}).get('title', ''),
+                "localized_description": snippet.get('localized', {}).get('description', ''),
+                "etag": item.get('etag', '')
+            }
+
+            videos.append(video_data)
+
+        return videos

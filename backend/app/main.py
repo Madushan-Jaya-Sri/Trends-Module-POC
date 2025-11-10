@@ -1,12 +1,22 @@
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
 from datetime import datetime
+from typing import Optional
 
 from .config import settings
-from .services.trends_aggregator import TrendsAggregator
-from .models.schemas import TrendsResponse
+from .services.google_trends_service import GoogleTrendsService
+from .services.tiktok_service import TikTokService
+from .services.youtube_service import YouTubeService
+from .models.schemas import (
+    GoogleTrendsRequest,
+    GoogleTrendsResponse,
+    TikTokRequest,
+    TikTokResponse,
+    YouTubeRequest,
+    YouTubeResponse
+)
 
 # Configure logging
 logging.basicConfig(
@@ -19,8 +29,8 @@ logger = logging.getLogger(__name__)
 # Initialize FastAPI app
 app = FastAPI(
     title="Social Media Trends API",
-    description="Aggregate trending content from TikTok, YouTube, and Google Trends",
-    version="1.0.0"
+    description="Fetch trending content from TikTok, YouTube, and Google Trends",
+    version="2.0.0"
 )
 
 # Configure CORS
@@ -34,16 +44,15 @@ app.add_middleware(
 
 # Initialize services
 try:
-    trends_aggregator = TrendsAggregator(
-        apify_key=settings.APIFY_API_KEY,
-        youtube_key=settings.YOUTUBE_API_KEY,
-        serpapi_key=settings.SERPAPI_API_KEY,
-        openai_key=settings.OPENAI_API_KEY
-    )
+    google_trends_service = GoogleTrendsService(api_key=settings.SERPAPI_API_KEY)
+    tiktok_service = TikTokService(api_key=settings.APIFY_API_KEY)
+    youtube_service = YouTubeService(api_key=settings.YOUTUBE_API_KEY)
     logger.info("Services initialized successfully")
 except Exception as e:
     logger.error(f"Error initializing services: {str(e)}")
-    trends_aggregator = None
+    google_trends_service = None
+    tiktok_service = None
+    youtube_service = None
 
 
 @app.get("/")
@@ -51,12 +60,13 @@ async def root():
     """Root endpoint"""
     return {
         "message": "Social Media Trends API",
-        "version": "1.0.0",
+        "version": "2.0.0",
         "status": "active",
         "endpoints": {
-            "/trends": "Get aggregated trends",
-            "/platforms": "Get platform statistics",
-            "/health": "Health check"
+            "POST /google-trends": "Get Google Trends data",
+            "POST /tiktok-trends": "Get TikTok trending data",
+            "POST /youtube-trends": "Get YouTube trending videos",
+            "GET /health": "Health check"
         }
     }
 
@@ -68,99 +78,119 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat() + 'Z',
         "services": {
-            "aggregator": "initialized" if trends_aggregator else "error"
+            "google_trends": "initialized" if google_trends_service else "error",
+            "tiktok": "initialized" if tiktok_service else "error",
+            "youtube": "initialized" if youtube_service else "error"
         }
     }
 
 
-@app.get("/trends", response_model=TrendsResponse)
-async def get_trends(
-    country: str = Query(default="US", description="Two-letter country code (e.g., US, GB, IN)"),
-    top_n: int = Query(default=20, ge=1, le=50, description="Number of top trends to return")
-):
+@app.post("/google-trends", response_model=GoogleTrendsResponse)
+async def get_google_trends(request: GoogleTrendsRequest = Body(...)):
     """
-    Get aggregated trending topics from TikTok, YouTube, and Google Trends
-    
-    - **country**: Two-letter country code (ISO 3166-1 alpha-2)
-    - **top_n**: Number of top trending topics to return (1-50)
-    
-    Returns unified trending recommendations with scores and content from each platform.
+    Get trending searches from Google Trends.
+
+    Request body:
+    - **country_code**: Two-letter country code (e.g., 'US', 'IN', 'LK')
+
+    Returns trending searches with timestamps, search volumes, and trending durations.
     """
     try:
-        if not trends_aggregator:
-            raise HTTPException(status_code=500, detail="Services not initialized")
-        
-        logger.info(f"Fetching trends for country: {country}, top_n: {top_n}")
-        
-        # Get aggregated trends
-        result = trends_aggregator.aggregate_trends(country=country.upper(), top_n=top_n)
-        
-        return result
-        
+        if not google_trends_service:
+            raise HTTPException(status_code=500, detail="Google Trends service not initialized")
+
+        logger.info(f"Fetching Google Trends for country: {request.country_code}")
+
+        trends = google_trends_service.get_trending_now(country_code=request.country_code)
+
+        return GoogleTrendsResponse(
+            country=request.country_code,
+            timestamp=datetime.utcnow().isoformat() + 'Z',
+            total_trends=len(trends),
+            trending_searches=trends
+        )
+
     except Exception as e:
-        logger.error(f"Error in get_trends: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error fetching trends: {str(e)}")
+        logger.error(f"Error in get_google_trends: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching Google Trends: {str(e)}")
 
 
-@app.get("/platforms")
-async def get_platform_stats(
-    country: str = Query(default="US", description="Two-letter country code")
-):
+@app.post("/tiktok-trends", response_model=TikTokResponse)
+async def get_tiktok_trends(request: TikTokRequest = Body(...)):
     """
-    Get statistics about data availability from each platform
-    
-    - **country**: Two-letter country code
-    
-    Returns status and count of trending items from each platform.
+    Get trending data from TikTok including hashtags, creators, sounds, and videos.
+
+    Request body:
+    - **country_code**: Two-letter country code (e.g., 'MY', 'US', 'IN')
+    - **results_per_page**: Number of results per category (default: 10)
+    - **time_range**: Time range in days (default: "7")
+
+    Returns categorized trending data from TikTok.
     """
     try:
-        if not trends_aggregator:
-            raise HTTPException(status_code=500, detail="Services not initialized")
-        
-        logger.info(f"Fetching platform stats for country: {country}")
-        
-        stats = trends_aggregator.get_platform_stats(country=country.upper())
-        
-        return {
-            "country": country.upper(),
-            "timestamp": datetime.utcnow().isoformat() + 'Z',
-            "platforms": stats
-        }
-        
+        if not tiktok_service:
+            raise HTTPException(status_code=500, detail="TikTok service not initialized")
+
+        logger.info(f"Fetching TikTok trends for country: {request.country_code}")
+
+        data = tiktok_service.get_trending_data(
+            country_code=request.country_code,
+            results_per_page=request.results_per_page,
+            time_range=request.time_range
+        )
+
+        return TikTokResponse(
+            country=request.country_code,
+            timestamp=datetime.utcnow().isoformat() + 'Z',
+            hashtags=data["hashtags"],
+            creators=data["creators"],
+            sounds=data["sounds"],
+            videos=data["videos"],
+            total_items={
+                "hashtags": len(data["hashtags"]),
+                "creators": len(data["creators"]),
+                "sounds": len(data["sounds"]),
+                "videos": len(data["videos"])
+            }
+        )
+
     except Exception as e:
-        logger.error(f"Error in get_platform_stats: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error fetching platform stats: {str(e)}")
+        logger.error(f"Error in get_tiktok_trends: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching TikTok trends: {str(e)}")
 
 
-@app.get("/countries")
-async def get_supported_countries():
+@app.post("/youtube-trends", response_model=YouTubeResponse)
+async def get_youtube_trends(request: YouTubeRequest = Body(...)):
     """
-    Get list of commonly supported country codes
-    
-    Returns a list of country codes that work well with all three platforms.
+    Get trending videos from YouTube.
+
+    Request body:
+    - **country_code**: Two-letter country code (e.g., 'US', 'MY', 'IN')
+    - **max_results**: Maximum number of videos to fetch (default: 10, max: 50)
+
+    Returns trending YouTube videos with comprehensive metadata.
     """
-    countries = [
-        {"code": "US", "name": "United States"},
-        {"code": "GB", "name": "United Kingdom"},
-        {"code": "CA", "name": "Canada"},
-        {"code": "AU", "name": "Australia"},
-        {"code": "IN", "name": "India"},
-        {"code": "DE", "name": "Germany"},
-        {"code": "FR", "name": "France"},
-        {"code": "JP", "name": "Japan"},
-        {"code": "BR", "name": "Brazil"},
-        {"code": "MX", "name": "Mexico"},
-        {"code": "ES", "name": "Spain"},
-        {"code": "IT", "name": "Italy"},
-        {"code": "KR", "name": "South Korea"},
-        {"code": "NL", "name": "Netherlands"},
-        {"code": "SE", "name": "Sweden"},
-    ]
-    
-    return {
-        "countries": countries,
-        "note": "More countries may be supported. These are the most commonly used."
-    }
+    try:
+        if not youtube_service:
+            raise HTTPException(status_code=500, detail="YouTube service not initialized")
+
+        logger.info(f"Fetching YouTube trends for country: {request.country_code}")
+
+        videos = youtube_service.get_trending_videos(
+            country_code=request.country_code,
+            max_results=request.max_results
+        )
+
+        return YouTubeResponse(
+            country=request.country_code,
+            timestamp=datetime.utcnow().isoformat() + 'Z',
+            total_videos=len(videos),
+            videos=videos
+        )
+
+    except Exception as e:
+        logger.error(f"Error in get_youtube_trends: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error fetching YouTube trends: {str(e)}")
 
 
 # Exception handlers
