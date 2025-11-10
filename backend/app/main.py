@@ -9,13 +9,16 @@ from .config import settings
 from .services.google_trends_service import GoogleTrendsService
 from .services.tiktok_service import TikTokService
 from .services.youtube_service import YouTubeService
+from .services.trend_aggregator_service import TrendAggregatorService
 from .models.schemas import (
     GoogleTrendsRequest,
     GoogleTrendsResponse,
     TikTokRequest,
     TikTokResponse,
     YouTubeRequest,
-    YouTubeResponse
+    YouTubeResponse,
+    UnifiedTrendingRequest,
+    UnifiedTrendingResponse
 )
 
 # Configure logging
@@ -47,12 +50,21 @@ try:
     google_trends_service = GoogleTrendsService(api_key=settings.SERPAPI_API_KEY)
     tiktok_service = TikTokService(api_key=settings.APIFY_API_KEY)
     youtube_service = YouTubeService(api_key=settings.YOUTUBE_API_KEY)
-    logger.info("Services initialized successfully")
+    
+    # Initialize aggregator service
+    trend_aggregator_service = TrendAggregatorService(
+        google_service=google_trends_service,
+        tiktok_service=tiktok_service,
+        youtube_service=youtube_service
+    )
+    
+    logger.info("All services initialized successfully")
 except Exception as e:
     logger.error(f"Error initializing services: {str(e)}")
     google_trends_service = None
     tiktok_service = None
     youtube_service = None
+    trend_aggregator_service = None
 
 
 @app.get("/")
@@ -66,6 +78,7 @@ async def root():
             "POST /google-trends": "Get Google Trends data",
             "POST /tiktok-trends": "Get TikTok trending data",
             "POST /youtube-trends": "Get YouTube trending videos",
+            "POST /unified-trends": "Get unified trending scores across all platforms",
             "GET /health": "Health check"
         }
     }
@@ -80,7 +93,8 @@ async def health_check():
         "services": {
             "google_trends": "initialized" if google_trends_service else "error",
             "tiktok": "initialized" if tiktok_service else "error",
-            "youtube": "initialized" if youtube_service else "error"
+            "youtube": "initialized" if youtube_service else "error",
+            "trend_aggregator": "initialized" if trend_aggregator_service else "error"
         }
     }
 
@@ -199,6 +213,158 @@ async def get_youtube_trends(request: YouTubeRequest = Body(...)):
     except Exception as e:
         logger.error(f"Error in get_youtube_trends: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching YouTube trends: {str(e)}")
+
+
+@app.post("/unified-trends", response_model=UnifiedTrendingResponse)
+async def get_unified_trends(request: UnifiedTrendingRequest = Body(...)):
+    """
+    Get unified trending data across all platforms with universal scoring.
+    
+    This endpoint aggregates data from Google Trends, YouTube, and TikTok,
+    calculates a universal trending score for each item, and returns the
+    top trends sorted by score.
+    
+    **Scoring Methodology:**
+    - Volume (30%): Raw reach and visibility metrics
+    - Engagement (25%): Quality of user interactions
+    - Velocity (20%): Speed of growth and viral potential
+    - Recency (15%): Time relevance with exponential decay
+    - Cross-Platform (10%): Presence across multiple platforms
+    
+    Request body:
+    - **country_code**: Two-letter country code (e.g., 'US', 'MY', 'IN')
+    - **category**: Optional unified category filter
+    - **max_results_per_platform**: Results to fetch from each platform (default: 10)
+    - **time_range**: Optional time filter: '1h', '24h', '7d', '30d', '3m', '6m', '1y'
+    - **limit**: Number of top trends to return (default: 25)
+    
+    Returns top trending items across all platforms with calculated scores.
+    """
+    try:
+        if not trend_aggregator_service:
+            raise HTTPException(status_code=500, detail="Trend aggregator service not initialized")
+        
+        logger.info(
+            f"Fetching unified trends for country: {request.country_code}, "
+            f"category: {request.category}, time_range: {request.time_range}"
+        )
+        
+        # Step 1: Aggregate data from all platforms
+        aggregated_data = trend_aggregator_service.aggregate_all_trends(
+            country_code=request.country_code,
+            category=request.category,
+            max_results=request.max_results_per_platform
+        )
+        
+        trends = aggregated_data['trends']
+        platform_counts = aggregated_data['platform_counts']
+        
+        logger.info(f"Aggregated {len(trends)} trends from all platforms")
+        
+        # Step 2: Filter by time range if specified
+        if request.time_range:
+            trends = trend_aggregator_service.filter_by_time_range(
+                trends=trends,
+                time_range=request.time_range
+            )
+            logger.info(f"After time filtering: {len(trends)} trends remain")
+        
+        # Step 3: Calculate universal trending scores
+        scored_trends = trend_aggregator_service.calculate_trending_scores(trends)
+        
+        logger.info("Calculated trending scores for all items")
+        
+        # Step 4: Limit to top N results
+        top_trends = scored_trends[:request.limit]
+        
+        # Step 5: Prepare metadata for response
+        for trend in top_trends:
+            # Extract relevant metadata based on platform
+            metadata = {}
+            
+            if trend['platform'] == 'google_trends':
+                metadata = {
+                    'search_volume': trend.get('search_volume', 0),
+                    'increase_percentage': trend.get('increase_percentage', 0),
+                    'active': trend.get('active', True),
+                    'categories': trend.get('categories', []),
+                    'started_ago': trend.get('started_ago', '')
+                }
+            
+            elif trend['platform'] == 'youtube':
+                metadata = {
+                    'channel': trend.get('channelTitle', ''),
+                    'views': trend.get('viewCount', 0),
+                    'likes': trend.get('likeCount', 0),
+                    'comments': trend.get('commentCount', 0),
+                    'duration_sec': trend.get('duration_sec', 0),
+                    'thumbnail': trend.get('thumbnail', ''),
+                    'published_at': trend.get('publishedAt', '')
+                }
+            
+            elif trend['platform'] == 'tiktok':
+                entity_type = trend.get('entity_type', '')
+                
+                if entity_type == 'hashtag':
+                    metadata = {
+                        'views': trend.get('viewCount', 0),
+                        'videos': trend.get('videoCount', 0),
+                        'industry': trend.get('industryName', ''),
+                        'rank': trend.get('rank', 0)
+                    }
+                elif entity_type == 'creator':
+                    metadata = {
+                        'followers': trend.get('followerCount', 0),
+                        'total_likes': trend.get('likedCount', 0),
+                        'avatar': trend.get('avatar', ''),
+                        'rank': trend.get('rank', 0)
+                    }
+                elif entity_type == 'sound':
+                    metadata = {
+                        'author': trend.get('author', ''),
+                        'duration_sec': trend.get('durationSec', 0),
+                        'cover_url': trend.get('coverUrl', ''),
+                        'rank': trend.get('rank', 0)
+                    }
+                elif entity_type == 'video':
+                    metadata = {
+                        'duration_sec': trend.get('durationSec', 0),
+                        'cover_url': trend.get('coverUrl', ''),
+                        'rank': trend.get('rank', 0)
+                    }
+            
+            trend['metadata'] = metadata
+        
+        # Remove raw_data to reduce response size (optional)
+        for trend in top_trends:
+            if 'raw_data' in trend:
+                del trend['raw_data']
+        
+        return UnifiedTrendingResponse(
+            country=request.country_code,
+            timestamp=datetime.utcnow().isoformat() + 'Z',
+            time_range=request.time_range,
+            total_trends_analyzed=len(scored_trends),
+            returned_trends=len(top_trends),
+            platform_counts=platform_counts,
+            score_methodology={
+                "weights": {
+                    "volume": 0.30,
+                    "engagement": 0.25,
+                    "velocity": 0.20,
+                    "recency": 0.15,
+                    "cross_platform": 0.10
+                },
+                "description": "Universal trending score combines volume, engagement, velocity, recency, and cross-platform presence",
+                "scale": "0-100 (higher is better)",
+                "normalization": "Min-max normalization within dataset"
+            },
+            trends=top_trends
+        )
+    
+    except Exception as e:
+        logger.error(f"Error in get_unified_trends: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching unified trends: {str(e)}")
 
 
 # Exception handlers

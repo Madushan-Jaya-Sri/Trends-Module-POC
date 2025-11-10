@@ -162,3 +162,59 @@ class YouTubeResponse(BaseModel):
     timestamp: str
     total_videos: int
     videos: List[Dict[str, Any]]
+
+
+# ======================= UNIFIED TRENDING SCHEMAS =======================
+
+class UnifiedTrendingRequest(BaseModel):
+    """Request schema for unified trending endpoint"""
+    country_code: str = Field(
+        default="US",
+        description="Two-letter country code (e.g., 'US', 'MY', 'IN', 'LK')"
+    )
+    category: Optional[UnifiedCategory] = Field(
+        default=None,
+        description="Optional category filter for all platforms"
+    )
+    max_results_per_platform: int = Field(
+        default=10,
+        ge=5,
+        le=50,
+        description="Maximum results to fetch per platform"
+    )
+    time_range: Optional[str] = Field(
+        default=None,
+        description="Filter by time range: '1h', '24h', '7d', '30d', '3m', '6m', '1y'"
+    )
+    limit: int = Field(
+        default=25,
+        ge=1,
+        le=100,
+        description="Number of top trends to return (after scoring)"
+    )
+
+
+class TrendItem(BaseModel):
+    """Schema for a unified trend item with score"""
+    platform: str
+    entity_type: str
+    id: str
+    title: str
+    name: str
+    url: str
+    trending_score: float
+    score_breakdown: Dict[str, float]
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    raw_data: Optional[Dict[str, Any]] = None
+
+
+class UnifiedTrendingResponse(BaseModel):
+    """Response schema for unified trending data"""
+    country: str
+    timestamp: str
+    time_range: Optional[str]
+    total_trends_analyzed: int
+    returned_trends: int
+    platform_counts: Dict[str, int]
+    score_methodology: Dict[str, Any]
+    trends: List[Dict[str, Any]]
