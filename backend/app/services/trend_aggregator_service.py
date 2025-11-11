@@ -234,7 +234,7 @@ class TrendAggregatorService:
         Returns:
             Trends with calculated scores, sorted by score
         """
-        return self.score_calculator.calculate_universal_score(trends)
+        return self.score_calculator.calculate_universal_score_adaptive(trends)
     
     def filter_by_time_range(
         self,

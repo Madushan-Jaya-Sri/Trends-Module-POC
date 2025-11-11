@@ -66,19 +66,36 @@ class TrendingScoreCalculator:
     
     def __init__(self):
         self.current_time = datetime.now(timezone.utc)
-    
-    def calculate_universal_score(
+        
+    def calculate_universal_score_adaptive(
         self,
         all_trends: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
         """
-        Calculate universal trending scores for all items.
+        Calculate universal trending scores with ADAPTIVE weights per platform.
         
-        Args:
-            all_trends: List of normalized trend items from all platforms
-            
-        Returns:
-            Sorted list of trends with calculated scores
+        Platform-Specific Weights:
+        
+        Google Trends (limited metrics):
+        - Volume: 35% (increased)
+        - Engagement: 15% (decreased - only has increase_pct)
+        - Velocity: 30% (increased - strength of Google Trends)
+        - Recency: 15% (same)
+        - Cross-Platform: 5% (decreased)
+        
+        YouTube (balanced metrics):
+        - Volume: 30%
+        - Engagement: 25%
+        - Velocity: 20%
+        - Recency: 15%
+        - Cross-Platform: 10%
+        
+        TikTok (rich engagement):
+        - Volume: 25% (decreased)
+        - Engagement: 30% (increased - strength of TikTok)
+        - Velocity: 20%
+        - Recency: 15%
+        - Cross-Platform: 10%
         """
         if not all_trends:
             return []
@@ -91,20 +108,63 @@ class TrendingScoreCalculator:
             trend['recency_score'] = self._calculate_recency_score(trend)
             trend['cross_platform_score'] = self._calculate_cross_platform_score(trend, all_trends)
         
+        # Normalize Google Trends engagement to match other platforms
+        all_trends = self._normalize_engagement_scores(all_trends)
+        
         # Normalize all component scores to 0-100 scale
         self._normalize_scores(all_trends, 'volume_score')
         self._normalize_scores(all_trends, 'engagement_score')
         self._normalize_scores(all_trends, 'velocity_score')
-        # recency_score and cross_platform_score are already 0-100
         
-        # Calculate final weighted score
+        # Calculate final weighted score with PLATFORM-SPECIFIC WEIGHTS
         for trend in all_trends:
+            platform = trend.get('platform', '')
+            
+            # Choose weights based on platform
+            if platform == 'google_trends':
+                # Emphasize what Google Trends is good at
+                weights = {
+                    'volume': 0.35,      # Higher
+                    'engagement': 0.15,  # Lower (limited data)
+                    'velocity': 0.30,    # Higher (strength)
+                    'recency': 0.15,     # Same
+                    'cross_platform': 0.05  # Lower
+                }
+            elif platform == 'youtube':
+                # Balanced approach
+                weights = {
+                    'volume': 0.30,
+                    'engagement': 0.25,
+                    'velocity': 0.20,
+                    'recency': 0.15,
+                    'cross_platform': 0.10
+                }
+            elif platform == 'tiktok':
+                # Emphasize engagement
+                weights = {
+                    'volume': 0.25,      # Lower
+                    'engagement': 0.30,  # Higher (strength)
+                    'velocity': 0.20,
+                    'recency': 0.15,
+                    'cross_platform': 0.10
+                }
+            else:
+                # Default weights
+                weights = {
+                    'volume': 0.30,
+                    'engagement': 0.25,
+                    'velocity': 0.20,
+                    'recency': 0.15,
+                    'cross_platform': 0.10
+                }
+            
+            # Calculate weighted score
             trend['trending_score'] = (
-                self.WEIGHT_VOLUME * trend['volume_score'] +
-                self.WEIGHT_ENGAGEMENT * trend['engagement_score'] +
-                self.WEIGHT_VELOCITY * trend['velocity_score'] +
-                self.WEIGHT_RECENCY * trend['recency_score'] +
-                self.WEIGHT_CROSS_PLATFORM * trend['cross_platform_score']
+                weights['volume'] * trend['volume_score'] +
+                weights['engagement'] * trend['engagement_score'] +
+                weights['velocity'] * trend['velocity_score'] +
+                weights['recency'] * trend['recency_score'] +
+                weights['cross_platform'] * trend['cross_platform_score']
             )
             
             # Round to 2 decimal places
@@ -118,18 +178,21 @@ class TrendingScoreCalculator:
                 'recency': round(trend['recency_score'], 2),
                 'cross_platform': round(trend['cross_platform_score'], 2)
             }
+            
+            # Add platform-specific weights used
+            trend['weights_used'] = weights
         
         # Sort by trending score (descending)
         all_trends.sort(key=lambda x: x['trending_score'], reverse=True)
         
         return all_trends
-    
+
     def _calculate_volume_score(self, trend: Dict[str, Any]) -> float:
         """
         Calculate volume score based on raw reach metrics.
         
         Platform-specific metrics:
-        - Google Trends: search_volume
+        - Google Trends: search_volume (boosted by 100x to compensate for scale)
         - YouTube: viewCount
         - TikTok: viewCount (for hashtags), followerCount (for creators)
         
@@ -138,7 +201,11 @@ class TrendingScoreCalculator:
         platform = trend.get('platform', '')
         
         if platform == 'google_trends':
-            return float(trend.get('search_volume', 0))
+            # Google Trends search volumes are typically 1K-500K
+            # YouTube/TikTok views are 100K-10M
+            # Multiply by 100 to bring to similar scale
+            search_volume = float(trend.get('search_volume', 0))
+            return search_volume * 100  # BOOST FACTOR
         
         elif platform == 'youtube':
             return float(trend.get('viewCount', 0))
@@ -164,14 +231,15 @@ class TrendingScoreCalculator:
         Higher engagement rate = more genuine interest.
         Considers likes, comments, shares relative to views.
         
-        Returns raw score (will be normalized later)
+        Returns raw score (will be normalized later with dynamic scaling)
         """
         platform = trend.get('platform', '')
         
         if platform == 'google_trends':
             # For Google Trends, use increase_percentage as proxy for engagement
+            # Return raw value - will be scaled dynamically later
             increase_pct = trend.get('increase_percentage', 0)
-            return float(increase_pct)
+            return float(increase_pct)  # Return raw value
         
         elif platform == 'youtube':
             views = trend.get('viewCount', 0)
@@ -209,6 +277,49 @@ class TrendingScoreCalculator:
         
         return 0.0
     
+    def _normalize_engagement_scores(self, trends: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Normalize Google Trends engagement scores to match YouTube/TikTok scale.
+        Uses dynamic range matching based on actual engagement values from other platforms.
+        
+        This ensures Google Trends engagement scores are comparable with other platforms
+        without causing drastic differences in the final scoring.
+        """
+        # Separate trends by platform
+        google_trends = [t for t in trends if t.get('platform') == 'google_trends']
+        other_trends = [t for t in trends if t.get('platform') != 'google_trends']
+        
+        if not other_trends or not google_trends:
+            return trends  # Nothing to normalize
+        
+        # Get engagement score ranges from YouTube/TikTok
+        other_scores = [t.get('engagement_score', 0) for t in other_trends if t.get('engagement_score', 0) > 0]
+        
+        if not other_scores:
+            return trends
+        
+        other_min = min(other_scores)
+        other_max = max(other_scores)
+        other_range = other_max - other_min
+        
+        # Get Google Trends range
+        google_scores = [t.get('engagement_score', 0) for t in google_trends]
+        google_min = min(google_scores) if google_scores else 0
+        google_max = max(google_scores) if google_scores else 1
+        google_range = google_max - google_min if google_max != google_min else 1
+        
+        # Scale Google Trends to match other platforms' range
+        for trend in google_trends:
+            raw_score = trend.get('engagement_score', 0)
+            
+            # Normalize to 0-1, then scale to other platforms' range
+            normalized = (raw_score - google_min) / google_range
+            scaled_score = other_min + (normalized * other_range)
+            
+            trend['engagement_score'] = scaled_score
+        
+        return trends
+    
     def _calculate_velocity_score(self, trend: Dict[str, Any]) -> float:
         """
         Calculate velocity score based on growth speed.
@@ -221,8 +332,22 @@ class TrendingScoreCalculator:
         platform = trend.get('platform', '')
         
         if platform == 'google_trends':
-            # Increase percentage directly indicates velocity
-            return float(trend.get('increase_percentage', 0))
+            # Use a combination of increase_percentage and active status
+            increase_pct = float(trend.get('increase_percentage', 0))
+            
+            # If trend is currently active, boost velocity
+            is_active = trend.get('active', True)
+            active_multiplier = 1.5 if is_active else 1.0
+            
+            # Calculate velocity based on increase % and activity
+            # Multiply by 30 and apply active multiplier
+            velocity = increase_pct * 30 * active_multiplier  # BOOST FACTOR
+            
+            # Bonus for very high increase percentages (1000%+)
+            if increase_pct >= 1000:
+                velocity *= 1.2  # Extra 20% boost for viral trends
+            
+            return velocity
         
         elif platform == 'youtube':
             # For YouTube, calculate velocity from views/publish time
