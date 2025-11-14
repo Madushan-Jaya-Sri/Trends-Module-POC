@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
@@ -7,6 +7,7 @@ from typing import Optional
 
 from .config import settings
 from .database import database
+from .auth import get_current_user, User
 from .services.google_trends_service import GoogleTrendsService
 from .services.tiktok_service import TikTokService
 from .services.youtube_service import YouTubeService
@@ -149,7 +150,10 @@ async def health_check():
 
 
 @app.post("/google-trends", response_model=GoogleTrendsResponse)
-async def get_google_trends(request: GoogleTrendsRequest = Body(...)):
+async def get_google_trends(
+    request: GoogleTrendsRequest = Body(...),
+    user: User = Depends(get_current_user)
+):
     """
     Get trending searches from Google Trends.
 
@@ -159,12 +163,14 @@ async def get_google_trends(request: GoogleTrendsRequest = Body(...)):
     - **time_period**: Time period filter ('4h', '24h', '48h', '7d')
 
     Returns trending searches with timestamps, search volumes, and trending durations.
+
+    Requires authentication via Bearer token in Authorization header.
     """
     try:
         if not google_trends_service:
             raise HTTPException(status_code=500, detail="Google Trends service not initialized")
 
-        logger.info(f"Fetching Google Trends for country: {request.country_code}, category: {request.category}, time_period: {request.time_period}")
+        logger.info(f"User {user.user_id} fetching Google Trends for country: {request.country_code}, category: {request.category}, time_period: {request.time_period}")
 
         # Map time_period to hours parameter
         hours = None
@@ -190,9 +196,10 @@ async def get_google_trends(request: GoogleTrendsRequest = Body(...)):
                     await data_storage_service.store_google_trends_item(
                         query=trend.get("query"),
                         country_code=request.country_code,
-                        trend_data=trend
+                        trend_data=trend,
+                        user_id=user.user_id
                     )
-                logger.info(f"Stored {len(trends)} Google Trends items in MongoDB")
+                logger.info(f"Stored {len(trends)} Google Trends items in MongoDB for user {user.user_id}")
             except Exception as storage_error:
                 logger.warning(f"Failed to store Google Trends items in MongoDB: {str(storage_error)}")
 
@@ -209,7 +216,10 @@ async def get_google_trends(request: GoogleTrendsRequest = Body(...)):
 
 
 @app.post("/tiktok-trends", response_model=TikTokResponse)
-async def get_tiktok_trends(request: TikTokRequest = Body(...)):
+async def get_tiktok_trends(
+    request: TikTokRequest = Body(...),
+    user: User = Depends(get_current_user)
+):
     """
     Get trending data from TikTok including hashtags, creators, sounds, and videos.
 
@@ -221,12 +231,14 @@ async def get_tiktok_trends(request: TikTokRequest = Body(...)):
     - **category**: Unified category to filter trending content (default: Shopping)
 
     Returns categorized trending data from TikTok.
+
+    Requires authentication via Bearer token in Authorization header.
     """
     try:
         if not tiktok_service:
             raise HTTPException(status_code=500, detail="TikTok service not initialized")
 
-        logger.info(f"Fetching TikTok trends for country: {request.country_code}, category: {request.category}, time_period: {request.time_period}")
+        logger.info(f"User {user.user_id} fetching TikTok trends for country: {request.country_code}, category: {request.category}, time_period: {request.time_period}")
 
         # Map time_period to days parameter
         time_period_days = None
@@ -261,7 +273,8 @@ async def get_tiktok_trends(request: TikTokRequest = Body(...)):
                         item_type="hashtag",
                         name=hashtag.get("name"),
                         country_code=request.country_code,
-                        item_data=hashtag
+                        item_data=hashtag,
+                        user_id=user.user_id
                     )
 
                 # Store creators
@@ -270,7 +283,8 @@ async def get_tiktok_trends(request: TikTokRequest = Body(...)):
                         item_type="creator",
                         name=creator.get("name"),
                         country_code=request.country_code,
-                        item_data=creator
+                        item_data=creator,
+                        user_id=user.user_id
                     )
 
                 # Store sounds
@@ -279,7 +293,8 @@ async def get_tiktok_trends(request: TikTokRequest = Body(...)):
                         item_type="sound",
                         name=sound.get("name"),
                         country_code=request.country_code,
-                        item_data=sound
+                        item_data=sound,
+                        user_id=user.user_id
                     )
 
                 # Store videos
@@ -288,10 +303,11 @@ async def get_tiktok_trends(request: TikTokRequest = Body(...)):
                         item_type="video",
                         name=video.get("name"),
                         country_code=request.country_code,
-                        item_data=video
+                        item_data=video,
+                        user_id=user.user_id
                     )
 
-                logger.info(f"Stored TikTok items in MongoDB: {len(data['hashtags'])} hashtags, {len(data['creators'])} creators, {len(data['sounds'])} sounds, {len(data['videos'])} videos")
+                logger.info(f"Stored TikTok items in MongoDB for user {user.user_id}: {len(data['hashtags'])} hashtags, {len(data['creators'])} creators, {len(data['sounds'])} sounds, {len(data['videos'])} videos")
             except Exception as storage_error:
                 logger.warning(f"Failed to store TikTok items in MongoDB: {str(storage_error)}")
 
@@ -316,7 +332,10 @@ async def get_tiktok_trends(request: TikTokRequest = Body(...)):
 
 
 @app.post("/youtube-trends", response_model=YouTubeResponse)
-async def get_youtube_trends(request: YouTubeRequest = Body(...)):
+async def get_youtube_trends(
+    request: YouTubeRequest = Body(...),
+    user: User = Depends(get_current_user)
+):
     """
     Get trending videos from YouTube.
 
@@ -327,12 +346,14 @@ async def get_youtube_trends(request: YouTubeRequest = Body(...)):
     - **time_period**: Time period filter ('1d', '7d', '30d', '90d')
 
     Returns trending YouTube videos with comprehensive metadata.
+
+    Requires authentication via Bearer token in Authorization header.
     """
     try:
         if not youtube_service:
             raise HTTPException(status_code=500, detail="YouTube service not initialized")
 
-        logger.info(f"Fetching YouTube trends for country: {request.country_code}, category: {request.category}, time_period: {request.time_period}")
+        logger.info(f"User {user.user_id} fetching YouTube trends for country: {request.country_code}, category: {request.category}, time_period: {request.time_period}")
 
         # Map time_period to days parameter
         time_period_days = None
@@ -359,9 +380,10 @@ async def get_youtube_trends(request: YouTubeRequest = Body(...)):
                     await data_storage_service.store_youtube_video(
                         video_id=video.get("id"),
                         country_code=request.country_code,
-                        video_data=video
+                        video_data=video,
+                        user_id=user.user_id
                     )
-                logger.info(f"Stored {len(videos)} YouTube videos in MongoDB")
+                logger.info(f"Stored {len(videos)} YouTube videos in MongoDB for user {user.user_id}")
             except Exception as storage_error:
                 logger.warning(f"Failed to store YouTube videos in MongoDB: {str(storage_error)}")
 
@@ -378,7 +400,10 @@ async def get_youtube_trends(request: YouTubeRequest = Body(...)):
 
 
 @app.post("/unified-trends", response_model=UnifiedTrendingResponse)
-async def get_unified_trends(request: UnifiedTrendingRequest = Body(...)):
+async def get_unified_trends(
+    request: UnifiedTrendingRequest = Body(...),
+    user: User = Depends(get_current_user)
+):
     """
     Get unified trending data across all platforms with universal scoring.
 
@@ -401,13 +426,15 @@ async def get_unified_trends(request: UnifiedTrendingRequest = Body(...)):
     - **limit**: Number of top trends to return (default: 25)
 
     Returns top trending items across all platforms with calculated scores.
+
+    Requires authentication via Bearer token in Authorization header.
     """
     try:
         if not trend_aggregator_service:
             raise HTTPException(status_code=500, detail="Trend aggregator service not initialized")
 
         logger.info(
-            f"Fetching unified trends for country: {request.country_code}, "
+            f"User {user.user_id} fetching unified trends for country: {request.country_code}, "
             f"category: {request.category}, time_range: {request.time_range}"
         )
 
@@ -503,9 +530,10 @@ async def get_unified_trends(request: UnifiedTrendingRequest = Body(...)):
                     country_code=request.country_code,
                     category=category_value,
                     time_range=request.time_range,
-                    trends_data=top_trends
+                    trends_data=top_trends,
+                    user_id=user.user_id
                 )
-                logger.info(f"Stored unified trends snapshot: {len(top_trends)} trends for {request.country_code}")
+                logger.info(f"Stored unified trends snapshot for user {user.user_id}: {len(top_trends)} trends for {request.country_code}")
             except Exception as storage_error:
                 logger.warning(f"Failed to store unified trends in MongoDB: {str(storage_error)}")
 
@@ -537,7 +565,10 @@ async def get_unified_trends(request: UnifiedTrendingRequest = Body(...)):
 
 
 @app.post("/google-trends/details", response_model=GoogleTrendsDetailsResponse)
-async def get_google_trends_details(request: GoogleTrendsDetailsRequest = Body(...)):
+async def get_google_trends_details(
+    request: GoogleTrendsDetailsRequest = Body(...),
+    user: User = Depends(get_current_user)
+):
     """
     Get detailed Google Trends analysis for a specific search query.
 
@@ -557,6 +588,8 @@ async def get_google_trends_details(request: GoogleTrendsDetailsRequest = Body(.
     - **region_level**: Region level ('REGION' or 'CITY') when geo is provided
 
     Returns comprehensive Google Trends analysis or specific region drill-down data.
+
+    Requires authentication via Bearer token in Authorization header.
     """
     try:
         if not google_trends_details_service:
@@ -565,7 +598,7 @@ async def get_google_trends_details(request: GoogleTrendsDetailsRequest = Body(.
         # Check if this is a region drill-down request (city-level data for specific region)
         if request.geo and request.region_level:
             logger.info(
-                f"Fetching city-level drill-down for query: '{request.query}', "
+                f"User {user.user_id} fetching city-level drill-down for query: '{request.query}', "
                 f"geo: {request.geo}, region_level: {request.region_level}"
             )
 
@@ -582,7 +615,8 @@ async def get_google_trends_details(request: GoogleTrendsDetailsRequest = Body(.
                 # Retrieve existing document and update with city data
                 existing_doc = await data_storage_service.get_google_trends_item(
                     query=request.query,
-                    country_code=request.country_code
+                    country_code=request.country_code,
+                    user_id=user.user_id
                 )
 
                 if existing_doc:
@@ -595,9 +629,10 @@ async def get_google_trends_details(request: GoogleTrendsDetailsRequest = Body(.
                     await data_storage_service.store_google_trends_item(
                         query=request.query,
                         country_code=request.country_code,
-                        trend_data=existing_doc
+                        trend_data=existing_doc,
+                        user_id=user.user_id
                     )
-                    logger.info(f"Stored city-level drill-down data for {request.geo} in MongoDB")
+                    logger.info(f"Stored city-level drill-down data for {request.geo} in MongoDB for user {user.user_id}")
             except Exception as storage_error:
                 logger.warning(f"Failed to store city-level drill-down data: {str(storage_error)}")
 
@@ -619,7 +654,7 @@ async def get_google_trends_details(request: GoogleTrendsDetailsRequest = Body(.
         else:
             # Fetch complete details (standard request)
             logger.info(
-                f"Fetching Google Trends details for query: '{request.query}', "
+                f"User {user.user_id} fetching Google Trends details for query: '{request.query}', "
                 f"country: {request.country_code}, date: {request.date}"
             )
 
@@ -635,7 +670,8 @@ async def get_google_trends_details(request: GoogleTrendsDetailsRequest = Body(.
                 await data_storage_service.store_google_trends_item(
                     query=request.query,
                     country_code=request.country_code,
-                    trend_data=details  # Pass all details
+                    trend_data=details,  # Pass all details
+                    user_id=user.user_id
                 )
             except Exception as storage_error:
                 logger.warning(f"Failed to store Google Trends details in MongoDB: {str(storage_error)}")
@@ -650,7 +686,10 @@ async def get_google_trends_details(request: GoogleTrendsDetailsRequest = Body(.
 
 
 @app.post("/youtube/details", response_model=YouTubeDetailsResponse)
-async def get_youtube_details(request: YouTubeDetailsRequest = Body(...)):
+async def get_youtube_details(
+    request: YouTubeDetailsRequest = Body(...),
+    user: User = Depends(get_current_user)
+):
     """
     Get detailed information for a specific YouTube video.
 
@@ -670,13 +709,15 @@ async def get_youtube_details(request: YouTubeDetailsRequest = Body(...)):
     - **max_comments**: Maximum number of comments to fetch (default: 20, max: 100)
 
     Returns comprehensive YouTube video details.
+
+    Requires authentication via Bearer token in Authorization header.
     """
     try:
         if not youtube_details_service:
             raise HTTPException(status_code=500, detail="YouTube details service not initialized")
 
         logger.info(
-            f"Fetching YouTube details for video: {request.video_id}, "
+            f"User {user.user_id} fetching YouTube details for video: {request.video_id}, "
             f"country: {request.country_code}, include_comments: {request.include_comments}"
         )
 
@@ -695,7 +736,8 @@ async def get_youtube_details(request: YouTubeDetailsRequest = Body(...)):
             await data_storage_service.store_youtube_video(
                 video_id=request.video_id,
                 country_code=request.country_code,
-                video_data=details  # Pass all details
+                video_data=details,  # Pass all details
+                user_id=user.user_id
             )
         except Exception as storage_error:
             logger.warning(f"Failed to store YouTube video in MongoDB: {str(storage_error)}")
@@ -710,7 +752,10 @@ async def get_youtube_details(request: YouTubeDetailsRequest = Body(...)):
 
 
 @app.post("/tiktok/details", response_model=TikTokDetailsResponse)
-async def get_tiktok_details(request: TikTokDetailsRequest = Body(...)):
+async def get_tiktok_details(
+    request: TikTokDetailsRequest = Body(...),
+    user: User = Depends(get_current_user)
+):
     """
     Get detailed information for a specific TikTok item.
 
@@ -729,13 +774,15 @@ async def get_tiktok_details(request: TikTokDetailsRequest = Body(...)):
     via the /tiktok-trends endpoint and stored in the database.
 
     Returns organized TikTok item details.
+
+    Requires authentication via Bearer token in Authorization header.
     """
     try:
         if not tiktok_details_service or not data_storage_service:
             raise HTTPException(status_code=500, detail="TikTok details service not initialized")
 
         logger.info(
-            f"Fetching TikTok details for {request.item_type}: '{request.name}', "
+            f"User {user.user_id} fetching TikTok details for {request.item_type}: '{request.name}', "
             f"country: {request.country_code}"
         )
 
@@ -743,7 +790,8 @@ async def get_tiktok_details(request: TikTokDetailsRequest = Body(...)):
         stored_item = await data_storage_service.get_tiktok_item(
             item_type=request.item_type,
             name=request.name,
-            country_code=request.country_code
+            country_code=request.country_code,
+            user_id=user.user_id
         )
 
         if not stored_item:

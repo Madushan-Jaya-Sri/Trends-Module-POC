@@ -22,7 +22,8 @@ class DataStorageService:
         self,
         query: str,
         country_code: str,
-        trend_data: Dict[str, Any]
+        trend_data: Dict[str, Any],
+        user_id: str
     ) -> bool:
         """
         Store or update a Google Trends item in MongoDB.
@@ -32,6 +33,7 @@ class DataStorageService:
             query: The search query
             country_code: Country code
             trend_data: The trending data to store
+            user_id: User ID from authentication token
 
         Returns:
             True if successful, False otherwise
@@ -39,10 +41,11 @@ class DataStorageService:
         try:
             collection = get_google_trends_collection()
 
-            # Check if document exists
+            # Check if document exists for this user
             existing_doc = await collection.find_one({
                 "query": query,
-                "country_code": country_code
+                "country_code": country_code,
+                "user_id": user_id
             })
 
             # Start with existing document or create new one
@@ -56,6 +59,8 @@ class DataStorageService:
                     "_id": doc_id,
                     "query": query,
                     "country_code": country_code,
+                    "user_id": user_id,
+                    "created_at": datetime.utcnow()
                 }
 
             # Update only fields that are present and not None in trend_data
@@ -113,7 +118,8 @@ class DataStorageService:
         self,
         video_id: str,
         country_code: str,
-        video_data: Dict[str, Any]
+        video_data: Dict[str, Any],
+        user_id: str
     ) -> bool:
         """
         Store or update a YouTube video in MongoDB.
@@ -123,6 +129,7 @@ class DataStorageService:
             video_id: YouTube video ID
             country_code: Country code where it's trending
             video_data: The video data to store
+            user_id: User ID from authentication token
 
         Returns:
             True if successful, False otherwise
@@ -130,10 +137,11 @@ class DataStorageService:
         try:
             collection = get_youtube_collection()
 
-            # Check if document exists
+            # Check if document exists for this user
             existing_doc = await collection.find_one({
                 "video_id": video_id,
-                "country_code": country_code
+                "country_code": country_code,
+                "user_id": user_id
             })
 
             # Start with existing document or create new one
@@ -146,6 +154,8 @@ class DataStorageService:
                     "_id": doc_id,
                     "video_id": video_id,
                     "country_code": country_code,
+                    "user_id": user_id,
+                    "created_at": datetime.utcnow()
                 }
 
             # Update only fields that are present and not None in video_data
@@ -255,7 +265,8 @@ class DataStorageService:
         item_type: str,
         name: str,
         country_code: str,
-        item_data: Dict[str, Any]
+        item_data: Dict[str, Any],
+        user_id: str
     ) -> bool:
         """
         Store or update a TikTok item in MongoDB.
@@ -266,6 +277,7 @@ class DataStorageService:
             name: Name/title of the item
             country_code: Country code
             item_data: The item data to store
+            user_id: User ID from authentication token
 
         Returns:
             True if successful, False otherwise
@@ -273,11 +285,12 @@ class DataStorageService:
         try:
             collection = get_tiktok_collection()
 
-            # Check if document exists
+            # Check if document exists for this user
             existing_doc = await collection.find_one({
                 "item_type": item_type,
                 "name": name,
-                "country_code": country_code
+                "country_code": country_code,
+                "user_id": user_id
             })
 
             # Start with existing document or create new one
@@ -291,6 +304,8 @@ class DataStorageService:
                     "item_type": item_type,
                     "name": name,
                     "country_code": country_code,
+                    "user_id": user_id,
+                    "created_at": datetime.utcnow()
                 }
 
             # Update common fields if present
@@ -421,7 +436,8 @@ class DataStorageService:
     async def get_google_trends_item(
         self,
         query: str,
-        country_code: str
+        country_code: str,
+        user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Retrieve a Google Trends item from MongoDB.
@@ -429,6 +445,7 @@ class DataStorageService:
         Args:
             query: The search query
             country_code: Country code
+            user_id: User ID from authentication token
 
         Returns:
             Item document or None if not found
@@ -438,7 +455,8 @@ class DataStorageService:
 
             document = await collection.find_one({
                 "query": query,
-                "country_code": country_code
+                "country_code": country_code,
+                "user_id": user_id
             })
             if document:
                 # Remove MongoDB _id field
@@ -454,7 +472,8 @@ class DataStorageService:
     async def get_youtube_video(
         self,
         video_id: str,
-        country_code: str
+        country_code: str,
+        user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Retrieve a YouTube video from MongoDB.
@@ -462,6 +481,7 @@ class DataStorageService:
         Args:
             video_id: YouTube video ID
             country_code: Country code
+            user_id: User ID from authentication token
 
         Returns:
             Video document or None if not found
@@ -471,7 +491,8 @@ class DataStorageService:
 
             document = await collection.find_one({
                 "video_id": video_id,
-                "country_code": country_code
+                "country_code": country_code,
+                "user_id": user_id
             })
             if document:
                 # Remove MongoDB _id field
@@ -488,7 +509,8 @@ class DataStorageService:
         self,
         item_type: str,
         name: str,
-        country_code: str
+        country_code: str,
+        user_id: str
     ) -> Optional[Dict[str, Any]]:
         """
         Retrieve a TikTok item from MongoDB.
@@ -497,6 +519,7 @@ class DataStorageService:
             item_type: Type of item (hashtag, creator, sound, video)
             name: Name/title of the item
             country_code: Country code
+            user_id: User ID from authentication token
 
         Returns:
             Item document or None if not found
@@ -507,7 +530,8 @@ class DataStorageService:
             document = await collection.find_one({
                 "item_type": item_type,
                 "name": name,
-                "country_code": country_code
+                "country_code": country_code,
+                "user_id": user_id
             })
             if document:
                 # Remove MongoDB _id field
@@ -525,7 +549,8 @@ class DataStorageService:
         country_code: str,
         category: Optional[str],
         time_range: str,
-        trends_data: List[Dict[str, Any]]
+        trends_data: List[Dict[str, Any]],
+        user_id: str
     ) -> bool:
         """
         Store unified trending data in MongoDB.
@@ -536,6 +561,7 @@ class DataStorageService:
             category: Category filter (can be None)
             time_range: Time range filter
             trends_data: List of trending items with scores
+            user_id: User ID from authentication token
 
         Returns:
             True if successful, False otherwise
@@ -545,6 +571,7 @@ class DataStorageService:
 
             document = {
                 "_id": str(uuid.uuid4()),
+                "user_id": user_id,
                 "country_code": country_code,
                 "category": category,
                 "time_range": time_range,
@@ -570,6 +597,7 @@ class DataStorageService:
     async def get_latest_unified_trends(
         self,
         country_code: str,
+        user_id: str,
         category: Optional[str] = None,
         time_range: str = "7d"
     ) -> Optional[Dict[str, Any]]:
@@ -578,6 +606,7 @@ class DataStorageService:
 
         Args:
             country_code: Country code
+            user_id: User ID from authentication token
             category: Category filter (can be None)
             time_range: Time range filter
 
@@ -588,6 +617,7 @@ class DataStorageService:
             collection = get_unified_trends_collection()
 
             query = {
+                "user_id": user_id,
                 "country_code": country_code,
                 "time_range": time_range
             }
