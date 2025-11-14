@@ -15,6 +15,10 @@ class GoogleTrendsRequest(BaseModel):
         default=None,
         description="Optional category filter for trending searches"
     )
+    time_period: Optional[str] = Field(
+        default=None,
+        description="Time period filter: '4h' (Past 4 hours), '24h' (Past 24 hours), '48h' (Past 48 hours), '7d' (Past 7 days)"
+    )
 
 
 class GoogleTrendsResponse(BaseModel):
@@ -41,11 +45,15 @@ class TikTokRequest(BaseModel):
     )
     time_range: str = Field(
         default="7",
-        description="Time range in days"
+        description="Time range in days (deprecated - use time_period instead)"
+    )
+    time_period: Optional[str] = Field(
+        default=None,
+        description="Time period filter: '7d' (Past 7 days), '30d' (Past 30 days), '120d' (Past 120 days)"
     )
     category: Optional[UnifiedCategory] = Field(
-        default=UnifiedCategory.SHOPPING,
-        description="Category filter for trending content (defaults to Shopping/Apparel & Accessories)"
+        default=None,
+        description="Optional category filter for trending content"
     )
 
 
@@ -125,6 +133,10 @@ class YouTubeRequest(BaseModel):
         default=None,
         description="Optional category filter for trending videos"
     )
+    time_period: Optional[str] = Field(
+        default=None,
+        description="Time period filter: '1d' (Past 1 day), '7d' (Past 7 days), '30d' (Past 30 days), '90d' (Past 90 days)"
+    )
 
 
 class YouTubeVideo(BaseModel):
@@ -183,8 +195,8 @@ class UnifiedTrendingRequest(BaseModel):
         description="Maximum results to fetch per platform"
     )
     time_range: Optional[str] = Field(
-        default=None,
-        description="Filter by time range: '1h', '24h', '7d', '30d', '3m', '6m', '1y'"
+        default="7d",
+        description="Filter by time range: '24h' (Past 24 hours), '7d' (Past 7 days - default), '30d' (Past 30 days), '90d' (Past 90 days)"
     )
     limit: int = Field(
         default=25,
@@ -218,3 +230,109 @@ class UnifiedTrendingResponse(BaseModel):
     platform_counts: Dict[str, int]
     score_methodology: Dict[str, Any]
     trends: List[Dict[str, Any]]
+
+
+# ======================= DETAILS ENDPOINTS SCHEMAS =======================
+
+class GoogleTrendsDetailsRequest(BaseModel):
+    """Request schema for Google Trends details endpoint"""
+    query: str = Field(..., description="The search query to get details for")
+    country_code: str = Field(
+        default="US",
+        description="Two-letter country code (e.g., 'US', 'IN', 'LK')"
+    )
+    date: str = Field(
+        default="today 12-m",
+        description="Time period (e.g., 'today 12-m', 'today 3-m', 'today 1-m')"
+    )
+    include_region_drill_down: bool = Field(
+        default=False,
+        description="Include city-level data for top regions (for initial request)"
+    )
+    geo: Optional[str] = Field(
+        default=None,
+        description="Geographic code for drill-down (e.g., 'LK-1' for Western Province). Used when fetching city-level data for a specific region."
+    )
+    region_level: Optional[str] = Field(
+        default=None,
+        description="Region level: 'REGION' for provinces/states, 'CITY' for cities within a region. Required when 'geo' is provided."
+    )
+
+
+class GoogleTrendsDetailsResponse(BaseModel):
+    """Response schema for Google Trends details"""
+    query: str
+    geo: str
+    date: str
+    timestamp: str
+    interest_over_time: Dict[str, Any]
+    related_topics: Dict[str, List[Dict[str, Any]]]
+    related_queries: Dict[str, List[Dict[str, Any]]]
+    interest_by_region: List[Dict[str, Any]]
+    region_drill_down: Optional[Dict[str, Any]] = None
+
+
+class YouTubeDetailsRequest(BaseModel):
+    """Request schema for YouTube video details endpoint"""
+    video_id: str = Field(..., description="YouTube video ID")
+    country_code: str = Field(
+        default="US",
+        description="Two-letter country code for context"
+    )
+    include_comments: bool = Field(
+        default=False,
+        description="Include top comments for the video"
+    )
+    max_comments: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        description="Maximum number of comments to fetch"
+    )
+
+
+class YouTubeDetailsResponse(BaseModel):
+    """Response schema for YouTube video details"""
+    video_id: str
+    timestamp: str
+    kind: Optional[str] = None
+    etag: Optional[str] = None
+    snippet: Dict[str, Any]
+    content_details: Dict[str, Any]
+    statistics: Dict[str, Any]
+    status: Dict[str, Any]
+    topic_details: Dict[str, Any]
+    player: Dict[str, Any]
+    recording_details: Optional[Dict[str, Any]] = None
+    available_localizations: List[str] = []
+    comments: Optional[List[Dict[str, Any]]] = None
+    total_comments: Optional[int] = None
+
+
+class TikTokDetailsRequest(BaseModel):
+    """Request schema for TikTok item details endpoint"""
+    item_type: str = Field(
+        ...,
+        description="Type of TikTok item (hashtag, creator, sound, video)"
+    )
+    name: str = Field(..., description="Name/title of the item")
+    country_code: str = Field(
+        default="MY",
+        description="Two-letter country code"
+    )
+
+
+class TikTokDetailsResponse(BaseModel):
+    """Response schema for TikTok item details"""
+    item_type: str
+    name: str
+    url: Optional[str] = None
+    country_code: Optional[str] = None
+    rank: Optional[int] = None
+    metrics: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = None
+    industry: Optional[Dict[str, Any]] = None
+    trending_histogram: Optional[List[Dict[str, Any]]] = None
+    related_creators: Optional[List[Dict[str, Any]]] = None
+    related_videos: Optional[List[Dict[str, Any]]] = None
+    timestamp: str

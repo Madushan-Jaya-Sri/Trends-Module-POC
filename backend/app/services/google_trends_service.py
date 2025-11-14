@@ -13,13 +13,16 @@ class GoogleTrendsService:
     def __init__(self, api_key: str):
         self.api_key = api_key
 
-    def get_trending_now(self, country_code: str = "US", category: Optional[UnifiedCategory] = None) -> List[Dict[str, Any]]:
+    def get_trending_now(self, country_code: str = "US", category: Optional[UnifiedCategory] = None, hours: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Fetch trending searches from Google Trends for a specific country.
 
         Args:
             country_code: Two-letter country code (e.g., 'US', 'LK', 'IN')
             category: Optional unified category to filter trends
+            hours: Optional time period filter in hours.
+                   Supported values: 4 (Past 4 hours), 24 (Past 24 hours),
+                   48 (Past 48 hours), 168 (Past 7 days)
 
         Returns:
             List of trending searches with enhanced metadata
@@ -30,6 +33,11 @@ class GoogleTrendsService:
                 "geo": country_code,
                 "api_key": self.api_key
             }
+
+            # Add hours filter if provided
+            if hours is not None:
+                params["hours"] = hours
+                logger.info(f"Filtering Google Trends by time period: {hours} hours")
 
             # Add category filter if provided
             if category:

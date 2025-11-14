@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     YOUTUBE_API_KEY: str
     SERPAPI_API_KEY: str
     OPENAI_API_KEY: Optional[str] = None
+    MONGODB_URI: Optional[str] = None
 
     class Config:
         # Look for .env file in the project root (parent of backend directory)

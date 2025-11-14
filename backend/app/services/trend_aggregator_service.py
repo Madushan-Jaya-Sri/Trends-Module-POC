@@ -34,59 +34,91 @@ class TrendAggregatorService:
         self,
         country_code: str = "US",
         category: Optional[Any] = None,
-        max_results: int = 10
+        max_results: int = 10,
+        time_period: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Fetch and aggregate trending data from all platforms.
-        
+        Fetch and aggregate trending data from all platforms with optimized pre-filtering.
+
         Args:
             country_code: Country code for regional trends
             category: Optional unified category filter
             max_results: Number of results to fetch per platform
-            
+            time_period: Time period filter ('24h', '7d', '30d', '90d')
+
         Returns:
             Dictionary containing all trends in normalized format
         """
         all_trends = []
-        
+
+        # Map time_period to platform-specific parameters
+        google_hours = None
+        youtube_days = None
+        tiktok_days = None
+
+        if time_period:
+            if time_period == '24h':
+                google_hours = 24  # Past 24 hours
+                youtube_days = 1
+                tiktok_days = 1  # Will fetch 7 days and filter to 1
+            elif time_period == '7d':
+                google_hours = 168  # Past 7 days
+                youtube_days = 7
+                tiktok_days = 7
+            elif time_period == '30d':
+                google_hours = 168  # Max 7 days for Google Trends
+                youtube_days = 30
+                tiktok_days = 30
+            elif time_period == '90d':
+                google_hours = 168  # Max 7 days for Google Trends
+                youtube_days = 90
+                tiktok_days = 90  # Will use 120 days range
+
         # Fetch from Google Trends
         try:
             google_trends = self.google_service.get_trending_now(
                 country_code=country_code,
-                category=category
+                category=category,
+                hours=google_hours
             )
             normalized_google = self._normalize_google_trends(google_trends)
             all_trends.extend(normalized_google)
             logger.info(f"Aggregated {len(normalized_google)} Google Trends")
         except Exception as e:
             logger.error(f"Error fetching Google Trends: {str(e)}")
-        
+
         # Fetch from YouTube
         try:
             youtube_videos = self.youtube_service.get_trending_videos(
                 country_code=country_code,
                 max_results=max_results,
-                category=category
+                category=category,
+                time_period_days=youtube_days
             )
             normalized_youtube = self._normalize_youtube_trends(youtube_videos)
             all_trends.extend(normalized_youtube)
             logger.info(f"Aggregated {len(normalized_youtube)} YouTube videos")
         except Exception as e:
             logger.error(f"Error fetching YouTube trends: {str(e)}")
-        
+
         # Fetch from TikTok
         try:
-            tiktok_data = self.tiktok_service.get_trending_data(
-                country_code=country_code,
-                results_per_page=max_results,
-                category=category
-            )
+            # Only pass category if it's not None (let TikTok use its default)
+            tiktok_kwargs = {
+                "country_code": country_code,
+                "results_per_page": max_results,
+                "time_period_days": tiktok_days
+            }
+            if category is not None:
+                tiktok_kwargs["category"] = category
+
+            tiktok_data = self.tiktok_service.get_trending_data(**tiktok_kwargs)
             normalized_tiktok = self._normalize_tiktok_trends(tiktok_data)
             all_trends.extend(normalized_tiktok)
             logger.info(f"Aggregated {len(normalized_tiktok)} TikTok items")
         except Exception as e:
             logger.error(f"Error fetching TikTok trends: {str(e)}")
-        
+
         return {
             'trends': all_trends,
             'total_count': len(all_trends),
