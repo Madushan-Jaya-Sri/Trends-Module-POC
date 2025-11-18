@@ -336,3 +336,21 @@ class TikTokDetailsResponse(BaseModel):
     related_creators: Optional[List[Dict[str, Any]]] = None
     related_videos: Optional[List[Dict[str, Any]]] = None
     timestamp: str
+
+
+# ======================= AI ANALYSIS SCHEMAS =======================
+
+class AIAnalysisRequest(BaseModel):
+    """Request schema for AI analysis endpoints (interpretation and recommendations)"""
+    country_code: str = Field(
+        default="US",
+        description="Two-letter country code (e.g., 'US', 'MY', 'IN')"
+    )
+    category: Optional[UnifiedCategory] = Field(
+        default=None,
+        description="Optional category filter"
+    )
+    time_range: str = Field(
+        default="7d",
+        description="Time range: '24h', '7d', '30d', '90d'"
+    )

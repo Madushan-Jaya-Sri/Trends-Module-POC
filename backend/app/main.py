@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Body, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import logging
 from datetime import datetime
 from typing import Optional
@@ -16,6 +16,7 @@ from .services.google_trends_details_service import GoogleTrendsDetailsService
 from .services.youtube_details_service import YouTubeDetailsService
 from .services.tiktok_details_service import TikTokDetailsService
 from .services.data_storage_service import DataStorageService
+from .services.ai_analysis_service import AIAnalysisService
 from .models.schemas import (
     GoogleTrendsRequest,
     GoogleTrendsResponse,
@@ -30,7 +31,8 @@ from .models.schemas import (
     YouTubeDetailsRequest,
     YouTubeDetailsResponse,
     TikTokDetailsRequest,
-    TikTokDetailsResponse
+    TikTokDetailsResponse,
+    AIAnalysisRequest
 )
 
 # Configure logging
@@ -96,6 +98,7 @@ try:
     youtube_details_service = YouTubeDetailsService(api_key=settings.YOUTUBE_API_KEY)
     tiktok_details_service = TikTokDetailsService()
     data_storage_service = DataStorageService()
+    ai_analysis_service = AIAnalysisService()
 
     logger.info("All services initialized successfully")
 except Exception as e:
@@ -108,6 +111,7 @@ except Exception as e:
     youtube_details_service = None
     tiktok_details_service = None
     data_storage_service = None
+    ai_analysis_service = None
 
 
 @app.get("/")
@@ -125,6 +129,8 @@ async def root():
             "POST /google-trends/details": "Get detailed Google Trends analysis",
             "POST /youtube/details": "Get detailed YouTube video information",
             "POST /tiktok/details": "Get detailed TikTok item information",
+            "POST /ai-interpretation": "Get AI-powered trend interpretation (streaming)",
+            "POST /ai-recommendations": "Get AI-powered marketing recommendations (streaming)",
             "GET /health": "Health check"
         }
     }
@@ -817,6 +823,162 @@ async def get_tiktok_details(
     except Exception as e:
         logger.error(f"Error in get_tiktok_details: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error fetching TikTok details: {str(e)}")
+
+
+# ======================= AI ANALYSIS ENDPOINTS =======================
+
+@app.post("/ai-interpretation")
+async def get_ai_interpretation(
+    request: AIAnalysisRequest = Body(...),
+    user: User = Depends(get_current_user)
+):
+    """
+    Get AI-powered interpretation of trending data with streaming response.
+
+    This endpoint analyzes unified trends data from MongoDB and provides structured insights
+    including patterns, platform-specific insights, emerging topics, and audience behavior.
+
+    Request body:
+    - **country_code**: Two-letter country code (default: 'US')
+    - **category**: Optional category filter
+    - **time_range**: Time range: '24h', '7d', '30d', '90d' (default: '7d')
+
+    Returns streaming text response with AI-generated interpretation in markdown format.
+
+    Requires authentication via Bearer token in Authorization header.
+    """
+    try:
+        if not ai_analysis_service:
+            raise HTTPException(status_code=500, detail="AI analysis service not initialized")
+
+        if not data_storage_service:
+            raise HTTPException(status_code=500, detail="Data storage service not initialized")
+
+        logger.info(
+            f"User {user.user_id} requesting AI interpretation for {request.country_code}, "
+            f"category: {request.category}, time_range: {request.time_range}"
+        )
+
+        # Retrieve latest unified trends data for this user
+        category_value = request.category.value if request.category else None
+        trends_snapshot = await data_storage_service.get_latest_unified_trends(
+            country_code=request.country_code,
+            user_id=user.user_id,
+            category=category_value,
+            time_range=request.time_range
+        )
+
+        if not trends_snapshot or not trends_snapshot.get('trends'):
+            raise HTTPException(
+                status_code=404,
+                detail=f"No trends data found for {request.country_code} with the specified filters. "
+                       "Please fetch unified trends first using /unified-trends endpoint."
+            )
+
+        trends_data = trends_snapshot.get('trends', [])
+        logger.info(f"Found {len(trends_data)} trends for AI interpretation")
+
+        # Stream the AI interpretation
+        async def generate_interpretation():
+            async for chunk in ai_analysis_service.stream_trend_interpretation(
+                trends_data=trends_data,
+                country_code=request.country_code,
+                time_range=request.time_range,
+                category=category_value
+            ):
+                yield chunk
+
+        return StreamingResponse(
+            generate_interpretation(),
+            media_type="text/plain",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no"  # Disable buffering for nginx
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_ai_interpretation: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error generating AI interpretation: {str(e)}")
+
+
+@app.post("/ai-recommendations")
+async def get_ai_recommendations(
+    request: AIAnalysisRequest = Body(...),
+    user: User = Depends(get_current_user)
+):
+    """
+    Get AI-powered marketing recommendations based on trending data with streaming response.
+
+    This endpoint analyzes unified trends data and provides actionable marketing recommendations
+    including content strategy, audience targeting, campaign ideas, SEO keywords, and social media tactics.
+
+    Request body:
+    - **country_code**: Two-letter country code (default: 'US')
+    - **category**: Optional category filter
+    - **time_range**: Time range: '24h', '7d', '30d', '90d' (default: '7d')
+
+    Returns streaming text response with AI-generated marketing recommendations in markdown format.
+
+    Requires authentication via Bearer token in Authorization header.
+    """
+    try:
+        if not ai_analysis_service:
+            raise HTTPException(status_code=500, detail="AI analysis service not initialized")
+
+        if not data_storage_service:
+            raise HTTPException(status_code=500, detail="Data storage service not initialized")
+
+        logger.info(
+            f"User {user.user_id} requesting AI recommendations for {request.country_code}, "
+            f"category: {request.category}, time_range: {request.time_range}"
+        )
+
+        # Retrieve latest unified trends data for this user
+        category_value = request.category.value if request.category else None
+        trends_snapshot = await data_storage_service.get_latest_unified_trends(
+            country_code=request.country_code,
+            user_id=user.user_id,
+            category=category_value,
+            time_range=request.time_range
+        )
+
+        if not trends_snapshot or not trends_snapshot.get('trends'):
+            raise HTTPException(
+                status_code=404,
+                detail=f"No trends data found for {request.country_code} with the specified filters. "
+                       "Please fetch unified trends first using /unified-trends endpoint."
+            )
+
+        trends_data = trends_snapshot.get('trends', [])
+        logger.info(f"Found {len(trends_data)} trends for AI recommendations")
+
+        # Stream the AI recommendations
+        async def generate_recommendations():
+            async for chunk in ai_analysis_service.stream_marketing_recommendations(
+                trends_data=trends_data,
+                country_code=request.country_code,
+                time_range=request.time_range,
+                category=category_value
+            ):
+                yield chunk
+
+        return StreamingResponse(
+            generate_recommendations(),
+            media_type="text/plain",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no"  # Disable buffering for nginx
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_ai_recommendations: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error generating AI recommendations: {str(e)}")
 
 
 # Exception handlers

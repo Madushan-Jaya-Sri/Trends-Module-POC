@@ -18,7 +18,7 @@ class YouTubeService:
     def get_trending_videos(
         self,
         country_code: str = "US",
-        max_results: int = 10,
+        max_results: int = 20,
         category: Optional[UnifiedCategory] = None,
         time_period_days: Optional[int] = None
     ) -> List[Dict[str, Any]]:
