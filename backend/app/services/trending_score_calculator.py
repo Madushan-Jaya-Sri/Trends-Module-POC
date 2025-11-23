@@ -219,9 +219,10 @@ class TrendingScoreCalculator:
             # Round to 2 decimal places
             trend['trending_score'] = round(trend['trending_score'], 2)
 
-            # Add score breakdown showing normalized scores (0-100 scale)
-            # These scores represent the trend's position relative to other trends in the dataset
-            # 0 = lowest in dataset, 100 = highest in dataset
+            # Add score breakdown showing percentage of total (0-100 scale)
+            # These scores represent the proportion of the total for each metric
+            # All volumes sum to 100%, all engagements sum to 100%, etc.
+            # Example: volume=25% means this trend represents 25% of total volume
             trend['score_breakdown'] = {
                 'volume': round(trend['volume_score'], 2),
                 'engagement': round(trend['engagement_score'], 2),
@@ -346,17 +347,19 @@ class TrendingScoreCalculator:
             views = trend.get('viewCount', 0)
             if views == 0:
                 return 0.0
-            
+
             likes = trend.get('likeCount', 0)
             comments = trend.get('commentCount', 0)
-            
-            # Engagement rate formula: (likes + comments) / views * 100
-            # engagement_rate = ((likes + comments) / views) * 100
-            engagement_score = (likes + comments)
 
+            # Engagement rate formula: (likes + comments) / views
+            # This ensures videos with the same likes+comments but different views get different scores
+            engagement_rate = (likes + comments) / views
 
-            # Scale it up for better distribution (typical ER is 2-5%)
-            # return engagement_rate * 1000
+            # Scale by 1M to get reasonable numbers for normalization
+            # Typical engagement rates are 2-5%, so 0.02-0.05
+            # Multiply by 1M to get 20,000-50,000 range
+            engagement_score = engagement_rate * 1_000_000
+
             return engagement_score
         
         elif platform == 'tiktok':
@@ -490,20 +493,30 @@ class TrendingScoreCalculator:
         elif platform == 'youtube':
             # For YouTube, calculate velocity from views/publish time
             views = trend.get('viewCount', 0)
+            likes = trend.get('likeCount', 0)
+            comments = trend.get('commentCount', 0)
             published_at = trend.get('publishedAt', '')
-            
+
             if published_at:
                 try:
                     pub_time = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
                     hours_since_publish = max(1, (self.current_time - pub_time).total_seconds() / 3600)
-                    
-                    # Views per hour
-                    velocity = views / hours_since_publish
+
+                    # Combined velocity: views per hour + engagement per hour
+                    # Weight views more heavily (70%) than engagement (30%)
+                    view_velocity = views / hours_since_publish
+                    engagement_velocity = (likes + comments) / hours_since_publish
+
+                    # Combined velocity with weighted average
+                    velocity = (view_velocity * 0.7) + (engagement_velocity * 0.3)
                     return velocity
                 except:
                     pass
-            
-            return float(views) / 24  # Assume 24 hours if no timestamp
+
+            # Fallback: assume 24 hours if no timestamp
+            view_velocity = float(views) / 24
+            engagement_velocity = float(likes + comments) / 24
+            return (view_velocity * 0.7) + (engagement_velocity * 0.3)
         
         elif platform == 'tiktok':
             entity_type = trend.get('entity_type', '')
@@ -779,7 +792,16 @@ class TrendingScoreCalculator:
     
     def _normalize_scores(self, trends: List[Dict[str, Any]], score_key: str):
         """
-        Normalize a score to 0-100 scale using min-max normalization.
+        Normalize scores to percentage of total (0-100 scale).
+
+        Each score represents the proportion of the total for that metric.
+        All scores for a metric sum to 100%.
+
+        Example:
+        - Trend A: volume 1000, Trend B: volume 500, Trend C: volume 500
+        - Total: 2000
+        - A: (1000/2000)*100 = 50%, B: 25%, C: 25%
+        - Sum: 50 + 25 + 25 = 100%
 
         Args:
             trends: List of trend items
@@ -789,36 +811,34 @@ class TrendingScoreCalculator:
             return
 
         scores = [t.get(score_key, 0) for t in trends]
-        min_score = min(scores)
-        max_score = max(scores)
+        total_score = sum(scores)
 
-        logger.info(f"Normalizing {score_key}: {len(trends)} trends, min={min_score:.4f}, max={max_score:.4f}")
+        logger.info(f"Normalizing {score_key}: {len(trends)} trends, total={total_score:.4f}")
 
-        # Handle case where all scores are the same
-        if max_score == min_score:
-            logger.info(f"All {score_key} values are identical ({max_score}), setting all to 50.0")
+        # Handle case where all scores are zero
+        if total_score == 0:
+            logger.info(f"All {score_key} values are zero, setting all to equal distribution")
+            equal_percentage = 100.0 / len(trends)
             for trend in trends:
-                trend[score_key] = 50.0  # Set to middle value
+                trend[score_key] = equal_percentage
             return
 
-        # Min-max normalization to 0-100
+        # Calculate percentage of total
         normalized_values = []
         for trend in trends:
             raw_score = trend.get(score_key, 0)
-            normalized = ((raw_score - min_score) / (max_score - min_score)) * 100
-            trend[score_key] = normalized
-            normalized_values.append(normalized)
+            percentage = (raw_score / total_score) * 100
+            trend[score_key] = percentage
+            normalized_values.append(percentage)
 
-        # Count how many trends got 100.0
-        count_100 = sum(1 for v in normalized_values if abs(v - 100.0) < 0.01)
-        count_0 = sum(1 for v in normalized_values if abs(v - 0.0) < 0.01)
+        # Verify sum equals 100 (allowing for small floating point errors)
+        total_percentage = sum(normalized_values)
 
-        if count_100 > 1:
-            logger.warning(f"WARNING: {count_100} trends have {score_key}=100.0 (max value)")
-        if count_0 > 1:
-            logger.warning(f"WARNING: {count_0} trends have {score_key}=0.0 (min value)")
+        # Count how many trends have very high or very low percentages
+        count_high = sum(1 for v in normalized_values if v > 10.0)
+        count_low = sum(1 for v in normalized_values if v < 0.1)
 
-        logger.info(f"Normalized {score_key}: {count_0} at 0.0, {count_100} at 100.0")
+        logger.info(f"Normalized {score_key}: total={total_percentage:.2f}%, >10%: {count_high}, <0.1%: {count_low}")
 
     def calculate_platform_specific_scores(
         self,
@@ -951,9 +971,10 @@ class TrendingScoreCalculator:
             # Round to 2 decimal places
             trend['trending_score'] = round(trend['trending_score'], 2)
 
-            # Add score breakdown showing normalized scores (0-100 scale)
-            # These scores represent the trend's position relative to other trends in the platform
-            # 0 = lowest in platform, 100 = highest in platform
+            # Add score breakdown showing percentage of total (0-100 scale)
+            # These scores represent the proportion of the total for each metric within the platform
+            # All volumes for this platform sum to 100%, all engagements sum to 100%, etc.
+            # Example: volume=25% means this trend represents 25% of total volume in this platform
             trend['score_breakdown'] = {
                 'volume': round(trend['volume_score'], 2),
                 'engagement': round(trend['engagement_score'], 2),
