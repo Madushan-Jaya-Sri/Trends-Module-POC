@@ -66,6 +66,12 @@ class TrendingScoreCalculator:
     
     def __init__(self):
         self.current_time = datetime.now(timezone.utc)
+        # Max values for TikTok normalization
+        self.max_hashtag_views = 1
+        self.max_hashtag_videos = 1
+        self.max_hashtag_rank = 1
+        self.max_sound_rank = 1
+        self.max_video_rank = 1
         
     def calculate_universal_score_adaptive(
         self,
@@ -99,7 +105,10 @@ class TrendingScoreCalculator:
         """
         if not all_trends:
             return []
-        
+
+        # Pre-calculate max values for TikTok normalization
+        self._calculate_tiktok_max_values(all_trends)
+
         # Calculate individual component scores
         for trend in all_trends:
             trend['volume_score'] = self._calculate_volume_score(trend)
@@ -119,7 +128,7 @@ class TrendingScoreCalculator:
         # Calculate final weighted score with PLATFORM-SPECIFIC WEIGHTS
         for trend in all_trends:
             platform = trend.get('platform', '')
-            
+
             # Choose weights based on platform
             if platform == 'google_trends':
                 # Emphasize what Google Trends is good at
@@ -140,14 +149,54 @@ class TrendingScoreCalculator:
                     'cross_platform': 0.10
                 }
             elif platform == 'tiktok':
-                # Emphasize engagement
-                weights = {
-                    'volume': 0.25,      # Lower
-                    'engagement': 0.30,  # Higher (strength)
-                    'velocity': 0.20,
-                    'recency': 0.15,
-                    'cross_platform': 0.10
-                }
+                # TikTok: Use entity-type-specific weights
+                entity_type = trend.get('entity_type', '')
+
+                if entity_type == 'hashtag':
+                    # Hashtags: Emphasize engagement (viewCount, videoCount, rank, momentum)
+                    weights = {
+                        'volume': 0.25,
+                        'engagement': 0.40,  # Strongest - rich engagement metrics
+                        'velocity': 0.20,
+                        'recency': 0.10,
+                        'cross_platform': 0.05
+                    }
+                elif entity_type == 'creator':
+                    # Creators: Emphasize velocity (enhanced with relatedVideos data)
+                    weights = {
+                        'volume': 0.25,
+                        'engagement': 0.25,
+                        'velocity': 0.35,    # Strongest - views/day, likes/day, posting frequency
+                        'recency': 0.10,
+                        'cross_platform': 0.05
+                    }
+                elif entity_type == 'sound':
+                    # Sounds: Balanced with emphasis on engagement and velocity
+                    weights = {
+                        'volume': 0.25,
+                        'engagement': 0.30,
+                        'velocity': 0.25,
+                        'recency': 0.10,
+                        'cross_platform': 0.10
+                    }
+                elif entity_type == 'video':
+                    # Videos: Balanced with emphasis on engagement and velocity
+                    weights = {
+                        'volume': 0.25,
+                        'engagement': 0.30,
+                        'velocity': 0.25,
+                        'recency': 0.10,
+                        'cross_platform': 0.10
+                    }
+                else:
+                    # Default TikTok weights (if entity_type is missing)
+                    weights = {
+                        'volume': 0.25,
+                        'engagement': 0.30,
+                        'velocity': 0.20,
+                        'recency': 0.15,
+                        'cross_platform': 0.10
+                    }
             else:
                 # Default weights
                 weights = {
@@ -169,8 +218,10 @@ class TrendingScoreCalculator:
             
             # Round to 2 decimal places
             trend['trending_score'] = round(trend['trending_score'], 2)
-            
-            # Add score breakdown for transparency
+
+            # Add score breakdown showing normalized scores (0-100 scale)
+            # These scores represent the trend's position relative to other trends in the dataset
+            # 0 = lowest in dataset, 100 = highest in dataset
             trend['score_breakdown'] = {
                 'volume': round(trend['volume_score'], 2),
                 'engagement': round(trend['engagement_score'], 2),
@@ -178,14 +229,64 @@ class TrendingScoreCalculator:
                 'recency': round(trend['recency_score'], 2),
                 'cross_platform': round(trend['cross_platform_score'], 2)
             }
-            
+
             # Add platform-specific weights used
             trend['weights_used'] = weights
         
         # Sort by trending score (descending)
         all_trends.sort(key=lambda x: x['trending_score'], reverse=True)
-        
+
         return all_trends
+
+    def _calculate_tiktok_max_values(self, all_trends: List[Dict[str, Any]]):
+        """
+        Pre-calculate maximum values for all TikTok entity types for relative normalization.
+
+        Args:
+            all_trends: List of all trending items
+        """
+        # Filter TikTok items by entity type
+        tiktok_hashtags = [
+            t for t in all_trends
+            if t.get('platform') == 'tiktok' and t.get('entity_type') == 'hashtag'
+        ]
+        tiktok_sounds = [
+            t for t in all_trends
+            if t.get('platform') == 'tiktok' and t.get('entity_type') == 'sound'
+        ]
+        tiktok_videos = [
+            t for t in all_trends
+            if t.get('platform') == 'tiktok' and t.get('entity_type') == 'video'
+        ]
+
+        # Find max values for hashtags
+        if tiktok_hashtags:
+            self.max_hashtag_views = max(
+                (float(h.get('viewCount', 0)) for h in tiktok_hashtags),
+                default=1
+            )
+            self.max_hashtag_videos = max(
+                (float(h.get('videoCount', 0)) for h in tiktok_hashtags),
+                default=1
+            )
+            self.max_hashtag_rank = max(
+                (float(h.get('rank', 1)) for h in tiktok_hashtags),
+                default=1
+            )
+
+        # Find max rank for sounds
+        if tiktok_sounds:
+            self.max_sound_rank = max(
+                (float(s.get('rank', 1)) for s in tiktok_sounds),
+                default=1
+            )
+
+        # Find max rank for videos
+        if tiktok_videos:
+            self.max_video_rank = max(
+                (float(v.get('rank', 1)) for v in tiktok_videos),
+                default=1
+            )
 
     def _calculate_volume_score(self, trend: Dict[str, Any]) -> float:
         """
@@ -218,9 +319,9 @@ class TrendingScoreCalculator:
                 # Followers are more stable than views
                 return float(trend.get('followerCount', 0)) * 10  # Weight up slightly
             elif entity_type == 'sound':
-                return float(trend.get('viewCount', 0))  # Approximate from related data
+                return float(trend.get('rank', 0))  # Approximate from related data
             elif entity_type == 'video':
-                return float(trend.get('viewCount', 0))
+                return float(trend.get('rank', 0))
         
         return 0.0
     
@@ -250,30 +351,67 @@ class TrendingScoreCalculator:
             comments = trend.get('commentCount', 0)
             
             # Engagement rate formula: (likes + comments) / views * 100
-            engagement_rate = ((likes + comments) / views) * 100
-            
+            # engagement_rate = ((likes + comments) / views) * 100
+            engagement_score = (likes + comments)
+
+
             # Scale it up for better distribution (typical ER is 2-5%)
-            return engagement_rate * 1000
+            # return engagement_rate * 1000
+            return engagement_score
         
         elif platform == 'tiktok':
             entity_type = trend.get('entity_type', '')
-            
+
             if entity_type == 'hashtag':
-                video_count = trend.get('videoCount', 0)
-                view_count = trend.get('viewCount', 1)  # Avoid division by zero
-                # More videos per view indicates active participation
-                return float(video_count) / float(view_count) * 1000000
-            
+                # Enhanced engagement calculation for hashtags with relative normalization
+                view_count = float(trend.get('viewCount', 0))
+                video_count = float(trend.get('videoCount', 0))
+                rank = float(trend.get('rank', 100))
+
+                # Relative logarithmic normalization for views and videos
+                # view_norm = log(viewCount + 1) / log(max_viewCount + 1)
+                # view_norm = math.log(view_count + 1) / math.log(self.max_hashtag_views + 1)
+                view_norm = (view_count)/ (self.max_hashtag_views)
+
+                # video_norm = log(videoCount + 1) / log(max_videoCount + 1)
+                # video_norm = math.log(video_count + 1) / math.log(self.max_hashtag_videos + 1)
+                video_norm = (video_count) / (self.max_hashtag_videos)
+                # Rank normalization (lower rank = better, so invert)
+                # rank_norm = 1 - (rank / max_rank)
+                rank_norm = 1 - (rank / self.max_hashtag_rank)
+
+                # Momentum from trending histogram (slope calculation)
+                momentum_norm = self._calculate_histogram_momentum(trend)
+
+                # Weighted engagement score
+                engagement_score = (
+                    (0.45 * view_norm) +
+                    (0.30 * video_norm) +
+                    (0.15 * rank_norm) +
+                    (0.10 * momentum_norm)
+                )
+
+                return engagement_score
+
             elif entity_type == 'creator':
                 liked_count = trend.get('likedCount', 0)
                 follower_count = trend.get('followerCount', 1)
                 # Likes per follower ratio
                 return (liked_count / follower_count) * 100
             
-            elif entity_type == 'sound' or entity_type == 'video':
-                # Use rank as proxy (lower rank = better engagement)
-                rank = trend.get('rank', 100)
-                return (100 - rank) * 10  # Invert so lower rank = higher score
+            elif entity_type == 'sound':
+                # Use rank normalization (lower rank = better engagement)
+                rank = float(trend.get('rank', self.max_sound_rank))
+                # rank_norm = 1 - (rank / max_rank)
+                rank_norm = 1 - (rank / self.max_sound_rank)
+                return rank_norm * 100  # Scale to 0-100
+
+            elif entity_type == 'video':
+                # Use rank normalization (lower rank = better engagement)
+                rank = float(trend.get('rank', self.max_video_rank))
+                # rank_norm = 1 - (rank / max_rank)
+                rank_norm = 1 - (rank / self.max_video_rank)
+                return rank_norm * 100  # Scale to 0-100
         
         return 0.0
     
@@ -368,17 +506,66 @@ class TrendingScoreCalculator:
             return float(views) / 24  # Assume 24 hours if no timestamp
         
         elif platform == 'tiktok':
-            # Use trending histogram to calculate growth rate
+            entity_type = trend.get('entity_type', '')
+
+            # Special handling for creators - use relatedVideos data
+            if entity_type == 'creator':
+                related_videos = trend.get('relatedVideos', [])
+
+                if related_videos and len(related_videos) >= 2:
+                    # Extract data from related videos
+                    total_views = 0
+                    total_likes = 0
+                    video_times = []
+
+                    for video in related_videos:
+                        total_views += video.get('viewCount', 0)
+                        total_likes += video.get('likedCount', 0)
+
+                        create_time = video.get('createTime')
+                        if create_time:
+                            try:
+                                video_time = datetime.fromisoformat(create_time.replace('Z', '+00:00'))
+                                video_times.append(video_time)
+                            except:
+                                pass
+
+                    # Calculate time span and velocity metrics
+                    if len(video_times) >= 2:
+                        video_times.sort()
+                        oldest_video = video_times[0]
+                        newest_video = video_times[-1]
+
+                        # Calculate days between oldest and newest video
+                        time_span = (newest_video - oldest_video).total_seconds() / 86400  # Convert to days
+                        time_span = max(1, time_span)  # Avoid division by zero
+
+                        # Calculate metrics
+                        views_per_day = total_views / time_span
+                        likes_per_day = total_likes / time_span
+                        posting_frequency = len(related_videos) / time_span  # Videos per day
+
+                        # Composite velocity score
+                        # Weight: 50% views/day, 30% likes/day, 20% posting frequency
+                        velocity = (
+                            (0.50 * views_per_day) +
+                            (0.30 * likes_per_day) +
+                            (0.20 * posting_frequency * 100000)  # Scale up posting frequency
+                        )
+
+                        return velocity
+
+            # For hashtags, sounds, videos - use trending histogram
             histogram = trend.get('trendingHistogram', [])
-            
+
             if len(histogram) >= 2:
                 # Calculate slope from first to last point
                 first_val = histogram[0].get('value', 0)
                 last_val = histogram[-1].get('value', 0)
-                
+
                 growth_rate = last_val - first_val
                 return max(0, growth_rate) * 100  # Scale up
-            
+
             # Fallback: use rank (lower = faster growing)
             rank = trend.get('rank', 100)
             return (100 - rank) * 10
@@ -412,14 +599,36 @@ class TrendingScoreCalculator:
                 except:
                     pass
         elif platform == 'tiktok':
-            # TikTok doesn't always provide timestamps, use trending start
-            histogram = trend.get('trendingHistogram', [])
-            if histogram:
-                try:
-                    date_str = histogram[-1].get('date', '')
-                    timestamp = datetime.fromisoformat(date_str.replace('Z', '+00:00')).timestamp()
-                except:
-                    pass
+            entity_type = trend.get('entity_type', '')
+
+            # Special handling for creators - use most recent video's createTime
+            if entity_type == 'creator':
+                related_videos = trend.get('relatedVideos', [])
+                if related_videos:
+                    # Find the most recent video
+                    most_recent_time = None
+                    for video in related_videos:
+                        create_time = video.get('createTime')
+                        if create_time:
+                            try:
+                                video_time = datetime.fromisoformat(create_time.replace('Z', '+00:00'))
+                                if most_recent_time is None or video_time > most_recent_time:
+                                    most_recent_time = video_time
+                            except:
+                                pass
+
+                    if most_recent_time:
+                        timestamp = most_recent_time.timestamp()
+
+            # For other TikTok items (hashtags, sounds, videos) - use trending histogram
+            if not timestamp:
+                histogram = trend.get('trendingHistogram', [])
+                if histogram:
+                    try:
+                        date_str = histogram[-1].get('date', '')
+                        timestamp = datetime.fromisoformat(date_str.replace('Z', '+00:00')).timestamp()
+                    except:
+                        pass
         
         if not timestamp:
             # No timestamp available, assume recent (12 hours ago)
@@ -481,10 +690,49 @@ class TrendingScoreCalculator:
         else:  # 3 or more
             return 100.0
     
+    def _calculate_histogram_momentum(self, trend: Dict[str, Any]) -> float:
+        """
+        Calculate momentum (trending speed) from trending histogram using slope.
+
+        Args:
+            trend: Trend item with trendingHistogram data
+
+        Returns:
+            Momentum score based on slope of trending data
+        """
+        histogram = trend.get('trendingHistogram', [])
+
+        if not histogram or len(histogram) < 2:
+            return 0.0
+
+        # Extract values from histogram
+        values = [point.get('value', 0) for point in histogram]
+
+        # Calculate simple linear regression slope
+        n = len(values)
+        x_values = list(range(n))  # Time points: 0, 1, 2, ...
+
+        # Calculate means
+        x_mean = sum(x_values) / n
+        y_mean = sum(values) / n
+
+        # Calculate slope using least squares method
+        numerator = sum((x_values[i] - x_mean) * (values[i] - y_mean) for i in range(n))
+        denominator = sum((x_values[i] - x_mean) ** 2 for i in range(n))
+
+        if denominator == 0:
+            return 0.0
+
+        slope = numerator / denominator
+
+        # Return absolute slope scaled up (can be positive or negative)
+        # Scale by 100 to bring to similar magnitude as other components
+        return abs(slope) * 100
+
     def _extract_key_terms(self, trend: Dict[str, Any]) -> set:
         """Extract searchable terms from trend item."""
         terms = set()
-        
+
         # Get title/name/query
         text = (
             trend.get('query', '') or
@@ -492,17 +740,17 @@ class TrendingScoreCalculator:
             trend.get('name', '') or
             ''
         )
-        
+
         # Normalize and split
         text = text.lower()
         words = text.split()
-        
+
         # Remove common stop words and keep significant terms
         stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'vs', 'x'}
         significant_words = [w for w in words if len(w) > 2 and w not in stop_words]
-        
+
         terms.update(significant_words)
-        
+
         return terms
     
     def _terms_overlap(self, terms1: set, terms2: set, threshold: float = 0.3) -> bool:
@@ -532,26 +780,191 @@ class TrendingScoreCalculator:
     def _normalize_scores(self, trends: List[Dict[str, Any]], score_key: str):
         """
         Normalize a score to 0-100 scale using min-max normalization.
-        
+
         Args:
             trends: List of trend items
             score_key: Key of the score to normalize
         """
         if not trends:
             return
-        
+
         scores = [t.get(score_key, 0) for t in trends]
         min_score = min(scores)
         max_score = max(scores)
-        
+
+        logger.info(f"Normalizing {score_key}: {len(trends)} trends, min={min_score:.4f}, max={max_score:.4f}")
+
         # Handle case where all scores are the same
         if max_score == min_score:
+            logger.info(f"All {score_key} values are identical ({max_score}), setting all to 50.0")
             for trend in trends:
                 trend[score_key] = 50.0  # Set to middle value
             return
-        
+
         # Min-max normalization to 0-100
+        normalized_values = []
         for trend in trends:
             raw_score = trend.get(score_key, 0)
             normalized = ((raw_score - min_score) / (max_score - min_score)) * 100
             trend[score_key] = normalized
+            normalized_values.append(normalized)
+
+        # Count how many trends got 100.0
+        count_100 = sum(1 for v in normalized_values if abs(v - 100.0) < 0.01)
+        count_0 = sum(1 for v in normalized_values if abs(v - 0.0) < 0.01)
+
+        if count_100 > 1:
+            logger.warning(f"WARNING: {count_100} trends have {score_key}=100.0 (max value)")
+        if count_0 > 1:
+            logger.warning(f"WARNING: {count_0} trends have {score_key}=0.0 (min value)")
+
+        logger.info(f"Normalized {score_key}: {count_0} at 0.0, {count_100} at 100.0")
+
+    def calculate_platform_specific_scores(
+        self,
+        trends: List[Dict[str, Any]],
+        platform: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Calculate trending scores for items from a single platform.
+
+        This uses the same scoring methodology as unified scoring but:
+        - Only scores items from the specified platform
+        - Cross-platform score is set to 0 (not applicable)
+        - Uses platform-specific weights
+        - Normalizes within the platform's dataset
+
+        Args:
+            trends: List of trend items from a single platform
+            platform: Platform name ('google_trends', 'youtube', or 'tiktok')
+
+        Returns:
+            List of trends with trending_score added, sorted by score
+        """
+        if not trends:
+            return []
+
+        # Pre-calculate TikTok max values if needed
+        if platform == 'tiktok':
+            self._calculate_tiktok_max_values(trends)
+
+        # Calculate individual component scores
+        for trend in trends:
+            trend['volume_score'] = self._calculate_volume_score(trend)
+            trend['engagement_score'] = self._calculate_engagement_score(trend)
+            trend['velocity_score'] = self._calculate_velocity_score(trend)
+            trend['recency_score'] = self._calculate_recency_score(trend)
+            trend['cross_platform_score'] = 0.0  # Not applicable for single platform
+
+        # Normalize component scores to 0-100 scale
+        self._normalize_scores(trends, 'volume_score')
+        self._normalize_scores(trends, 'engagement_score')
+        self._normalize_scores(trends, 'velocity_score')
+        # recency_score is already normalized (0-100)
+
+        # Calculate final weighted score with entity-type-specific weights for TikTok
+        for trend in trends:
+            # Get platform-specific weights
+            if platform == 'google_trends':
+                weights = {
+                    'volume': 0.40,      # Increased (no cross-platform)
+                    'engagement': 0.15,  # Lower (limited data)
+                    'velocity': 0.30,    # Higher (strength)
+                    'recency': 0.15,     # Same
+                    'cross_platform': 0.0
+                }
+            elif platform == 'youtube':
+                weights = {
+                    'volume': 0.35,
+                    'engagement': 0.30,
+                    'velocity': 0.20,
+                    'recency': 0.15,
+                    'cross_platform': 0.0
+                }
+            elif platform == 'tiktok':
+                # Use entity-type-specific weights for TikTok
+                entity_type = trend.get('entity_type', '')
+
+                if entity_type == 'hashtag':
+                    # Hashtags: Emphasize engagement (viewCount, videoCount, rank, momentum)
+                    weights = {
+                        'volume': 0.25,
+                        'engagement': 0.45,  # Strongest - rich engagement metrics
+                        'velocity': 0.20,
+                        'recency': 0.10,
+                        'cross_platform': 0.0
+                    }
+                elif entity_type == 'creator':
+                    # Creators: Emphasize velocity (enhanced with relatedVideos data)
+                    weights = {
+                        'volume': 0.25,
+                        'engagement': 0.25,
+                        'velocity': 0.40,    # Strongest - views/day, likes/day, posting frequency
+                        'recency': 0.10,
+                        'cross_platform': 0.0
+                    }
+                elif entity_type == 'sound':
+                    # Sounds: Balanced with emphasis on engagement and velocity
+                    weights = {
+                        'volume': 0.30,
+                        'engagement': 0.35,
+                        'velocity': 0.25,
+                        'recency': 0.10,
+                        'cross_platform': 0.0
+                    }
+                elif entity_type == 'video':
+                    # Videos: Balanced with emphasis on engagement and velocity
+                    weights = {
+                        'volume': 0.30,
+                        'engagement': 0.35,
+                        'velocity': 0.25,
+                        'recency': 0.10,
+                        'cross_platform': 0.0
+                    }
+                else:
+                    # Default TikTok weights (if entity_type is missing)
+                    weights = {
+                        'volume': 0.30,
+                        'engagement': 0.35,
+                        'velocity': 0.20,
+                        'recency': 0.15,
+                        'cross_platform': 0.0
+                    }
+            else:
+                # Default weights
+                weights = {
+                    'volume': 0.35,
+                    'engagement': 0.30,
+                    'velocity': 0.20,
+                    'recency': 0.15,
+                    'cross_platform': 0.0
+                }
+
+            # Calculate weighted score
+            trend['trending_score'] = (
+                weights['volume'] * trend['volume_score'] +
+                weights['engagement'] * trend['engagement_score'] +
+                weights['velocity'] * trend['velocity_score'] +
+                weights['recency'] * trend['recency_score']
+            )
+
+            # Round to 2 decimal places
+            trend['trending_score'] = round(trend['trending_score'], 2)
+
+            # Add score breakdown showing normalized scores (0-100 scale)
+            # These scores represent the trend's position relative to other trends in the platform
+            # 0 = lowest in platform, 100 = highest in platform
+            trend['score_breakdown'] = {
+                'volume': round(trend['volume_score'], 2),
+                'engagement': round(trend['engagement_score'], 2),
+                'velocity': round(trend['velocity_score'], 2),
+                'recency': round(trend['recency_score'], 2)
+            }
+
+            # Add entity-type-specific weights used (for transparency)
+            trend['weights_used'] = weights
+
+        # Sort by trending score (descending)
+        trends.sort(key=lambda x: x['trending_score'], reverse=True)
+
+        return trends

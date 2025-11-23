@@ -51,15 +51,17 @@ class AIAnalysisService:
 
 Please provide a structured interpretation with the following sections:
 
-1. **Overview**: Brief summary of the overall trend landscape
-2. **Key Patterns**: Major patterns and themes identified across platforms
-3. **Platform Insights**:
+
+1. **Overview**: High-level summary of key trends in TWO sentences. 
+2. **Executive Summary**: Summary of the overall trend landscape
+3. **Key Patterns**: Major patterns and themes identified across platforms
+4. **Platform Insights**:
    - Google Trends: What people are searching for
    - YouTube: What content is being watched
    - TikTok: What's viral on social media
-4. **Emerging Topics**: New or rapidly growing trends
-5. **Audience Behavior**: What this tells us about user interests and behavior
-6. **Temporal Analysis**: How trends vary over the {time_range} period
+5. **Emerging Topics**: New or rapidly growing trends
+6. **Audience Behavior**: What this tells us about user interests and behavior
+7. **Temporal Analysis**: How trends vary over the {time_range} period
 
 Format your response in clear, structured markdown with bullet points and sections."""
 

@@ -17,6 +17,7 @@ from .services.youtube_details_service import YouTubeDetailsService
 from .services.tiktok_details_service import TikTokDetailsService
 from .services.data_storage_service import DataStorageService
 from .services.ai_analysis_service import AIAnalysisService
+from .services.trending_score_calculator import TrendingScoreCalculator
 from .models.schemas import (
     GoogleTrendsRequest,
     GoogleTrendsResponse,
@@ -195,6 +196,23 @@ async def get_google_trends(
             hours=hours
         )
 
+        # Calculate platform-specific trending scores for each item
+        if trends:
+            try:
+                # Add platform identifier to each trend for scoring
+                for trend in trends:
+                    trend['platform'] = 'google_trends'
+
+                # Calculate trending scores
+                score_calculator = TrendingScoreCalculator()
+                trends = score_calculator.calculate_platform_specific_scores(
+                    trends=trends,
+                    platform='google_trends'
+                )
+                logger.info(f"Calculated trending scores for {len(trends)} Google Trends items")
+            except Exception as score_error:
+                logger.warning(f"Failed to calculate trending scores: {str(score_error)}")
+
         # Store Google Trends items in MongoDB for future reference (async operation)
         if data_storage_service:
             try:
@@ -269,6 +287,53 @@ async def get_tiktok_trends(
             tiktok_kwargs["category"] = request.category
 
         data = tiktok_service.get_trending_data(**tiktok_kwargs)
+
+        # Calculate platform-specific trending scores for all TikTok items
+        try:
+            # Combine all TikTok items for scoring
+            all_items = []
+
+            # Add hashtags with entity_type
+            for hashtag in data.get("hashtags", []):
+                hashtag['platform'] = 'tiktok'
+                hashtag['entity_type'] = 'hashtag'
+                all_items.append(hashtag)
+
+            # Add creators with entity_type
+            for creator in data.get("creators", []):
+                creator['platform'] = 'tiktok'
+                creator['entity_type'] = 'creator'
+                all_items.append(creator)
+
+            # Add sounds with entity_type
+            for sound in data.get("sounds", []):
+                sound['platform'] = 'tiktok'
+                sound['entity_type'] = 'sound'
+                all_items.append(sound)
+
+            # Add videos with entity_type
+            for video in data.get("videos", []):
+                video['platform'] = 'tiktok'
+                video['entity_type'] = 'video'
+                all_items.append(video)
+
+            # Calculate trending scores for all items together
+            if all_items:
+                score_calculator = TrendingScoreCalculator()
+                all_items = score_calculator.calculate_platform_specific_scores(
+                    trends=all_items,
+                    platform='tiktok'
+                )
+                logger.info(f"Calculated trending scores for {len(all_items)} TikTok items")
+
+                # Separate back into categories
+                data["hashtags"] = [item for item in all_items if item.get('entity_type') == 'hashtag']
+                data["creators"] = [item for item in all_items if item.get('entity_type') == 'creator']
+                data["sounds"] = [item for item in all_items if item.get('entity_type') == 'sound']
+                data["videos"] = [item for item in all_items if item.get('entity_type') == 'video']
+
+        except Exception as score_error:
+            logger.warning(f"Failed to calculate trending scores for TikTok items: {str(score_error)}")
 
         # Store TikTok items in MongoDB for future reference (async operation)
         if data_storage_service:
@@ -378,6 +443,23 @@ async def get_youtube_trends(
             category=request.category,
             time_period_days=time_period_days
         )
+
+        # Calculate platform-specific trending scores for each video
+        if videos:
+            try:
+                # Add platform identifier to each video for scoring
+                for video in videos:
+                    video['platform'] = 'youtube'
+
+                # Calculate trending scores
+                score_calculator = TrendingScoreCalculator()
+                videos = score_calculator.calculate_platform_specific_scores(
+                    trends=videos,
+                    platform='youtube'
+                )
+                logger.info(f"Calculated trending scores for {len(videos)} YouTube videos")
+            except Exception as score_error:
+                logger.warning(f"Failed to calculate trending scores: {str(score_error)}")
 
         # Store YouTube videos in MongoDB for future reference (async operation)
         if data_storage_service:
@@ -555,8 +637,8 @@ async def get_unified_trends(
                     "volume": 0.30,
                     "engagement": 0.25,
                     "velocity": 0.20,
-                    "recency": 0.15,
-                    "cross_platform": 0.10
+                    "recency": 0.20,
+                    "cross_platform": 0.05
                 },
                 "description": "Universal trending score combines volume, engagement, velocity, recency, and cross-platform presence",
                 "scale": "0-100 (higher is better)",
