@@ -133,19 +133,19 @@ class TrendingScoreCalculator:
             if platform == 'google_trends':
                 # Emphasize what Google Trends is good at
                 weights = {
-                    'volume': 0.35,      # Higher
+                    'volume': 0.10,      # Lower
                     'engagement': 0.15,  # Lower (limited data)
                     'velocity': 0.30,    # Higher (strength)
-                    'recency': 0.15,     # Same
-                    'cross_platform': 0.05  # Lower
+                    'recency': 0.35,     # Higher (to compensate)
+                    'cross_platform': 0.10  # Lower
                 }
             elif platform == 'youtube':
                 # Balanced approach
                 weights = {
-                    'volume': 0.30,
-                    'engagement': 0.25,
-                    'velocity': 0.20,
-                    'recency': 0.15,
+                    'volume': 0.10,
+                    'engagement': 0.35,
+                    'velocity': 0.25,
+                    'recency': 0.20,
                     'cross_platform': 0.10
                 }
             elif platform == 'tiktok':
@@ -155,38 +155,38 @@ class TrendingScoreCalculator:
                 if entity_type == 'hashtag':
                     # Hashtags: Emphasize engagement (viewCount, videoCount, rank, momentum)
                     weights = {
-                        'volume': 0.25,
-                        'engagement': 0.40,  # Strongest - rich engagement metrics
-                        'velocity': 0.20,
-                        'recency': 0.10,
+                        'volume': 0.15,
+                        'engagement': 0.35,  # Strongest - rich engagement metrics
+                        'velocity': 0.25,
+                        'recency': 0.20,
                         'cross_platform': 0.05
                     }
                 elif entity_type == 'creator':
                     # Creators: Emphasize velocity (enhanced with relatedVideos data)
                     weights = {
-                        'volume': 0.25,
-                        'engagement': 0.25,
-                        'velocity': 0.35,    # Strongest - views/day, likes/day, posting frequency
-                        'recency': 0.10,
-                        'cross_platform': 0.05
+                        'volume': 0.10,
+                        'engagement': 0.30,
+                        'velocity': 0.30,    # Strongest - views/day, likes/day, posting frequency
+                        'recency': 0.20,
+                        'cross_platform': 0.10
                     }
                 elif entity_type == 'sound':
                     # Sounds: Balanced with emphasis on engagement and velocity
                     weights = {
-                        'volume': 0.25,
+                        'volume': 0.01,
                         'engagement': 0.30,
-                        'velocity': 0.25,
-                        'recency': 0.10,
-                        'cross_platform': 0.10
+                        'velocity': 0.30,
+                        'recency': 0.24,
+                        'cross_platform': 0.15
                     }
                 elif entity_type == 'video':
                     # Videos: Balanced with emphasis on engagement and velocity
                     weights = {
-                        'volume': 0.25,
-                        'engagement': 0.30,
-                        'velocity': 0.25,
-                        'recency': 0.10,
-                        'cross_platform': 0.10
+                        'volume': 0.01,
+                        'engagement': 0.80,
+                        'velocity': 0.01,
+                        'recency': 0.01,
+                        'cross_platform': 0.17
                     }
                 else:
                     # Default TikTok weights (if entity_type is missing)
@@ -200,8 +200,8 @@ class TrendingScoreCalculator:
             else:
                 # Default weights
                 weights = {
-                    'volume': 0.30,
-                    'engagement': 0.25,
+                    'volume': 0.25,
+                    'engagement': 0.30,
                     'velocity': 0.20,
                     'recency': 0.15,
                     'cross_platform': 0.10
@@ -887,10 +887,10 @@ class TrendingScoreCalculator:
             # Get platform-specific weights
             if platform == 'google_trends':
                 weights = {
-                    'volume': 0.40,      # Increased (no cross-platform)
+                    'volume': 0.10,      # Increased (no cross-platform)
                     'engagement': 0.15,  # Lower (limited data)
-                    'velocity': 0.30,    # Higher (strength)
-                    'recency': 0.15,     # Same
+                    'velocity': 0.35,    # Higher (strength)
+                    'recency': 0.40,     # Same
                     'cross_platform': 0.0
                 }
             elif platform == 'youtube':
@@ -908,37 +908,37 @@ class TrendingScoreCalculator:
                 if entity_type == 'hashtag':
                     # Hashtags: Emphasize engagement (viewCount, videoCount, rank, momentum)
                     weights = {
-                        'volume': 0.25,
-                        'engagement': 0.45,  # Strongest - rich engagement metrics
-                        'velocity': 0.20,
-                        'recency': 0.10,
+                        'volume': 0.20,
+                        'engagement': 0.35,  # Strongest - rich engagement metrics
+                        'velocity': 0.25,
+                        'recency': 0.20,
                         'cross_platform': 0.0
                     }
                 elif entity_type == 'creator':
                     # Creators: Emphasize velocity (enhanced with relatedVideos data)
                     weights = {
-                        'volume': 0.25,
-                        'engagement': 0.25,
-                        'velocity': 0.40,    # Strongest - views/day, likes/day, posting frequency
-                        'recency': 0.10,
+                        'volume': 0.20,
+                        'engagement': 0.30,
+                        'velocity': 0.30,    # Strongest - views/day, likes/day, posting frequency
+                        'recency': 0.20,
                         'cross_platform': 0.0
                     }
                 elif entity_type == 'sound':
                     # Sounds: Balanced with emphasis on engagement and velocity
                     weights = {
-                        'volume': 0.30,
+                        'volume': 0.0,
                         'engagement': 0.35,
-                        'velocity': 0.25,
-                        'recency': 0.10,
+                        'velocity': 0.35,
+                        'recency': 0.30,
                         'cross_platform': 0.0
                     }
                 elif entity_type == 'video':
                     # Videos: Balanced with emphasis on engagement and velocity
                     weights = {
-                        'volume': 0.30,
-                        'engagement': 0.35,
-                        'velocity': 0.25,
-                        'recency': 0.10,
+                        'volume': 0.0,
+                        'engagement': 1.0,
+                        'velocity': 0.0,
+                        'recency': 0.0,
                         'cross_platform': 0.0
                     }
                 else:
