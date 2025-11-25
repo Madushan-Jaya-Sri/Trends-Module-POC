@@ -7,8 +7,14 @@ into a unified format for universal scoring and filtering.
 
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from .trending_score_calculator import TrendingScoreCalculator
+
+# Import service types for type checking only (avoids circular imports)
+if TYPE_CHECKING:
+    from .google_trends_service import GoogleTrendsService
+    from .tiktok_service import TikTokService
+    from .youtube_service import YouTubeService
 
 logger = logging.getLogger(__name__)
 
@@ -18,12 +24,12 @@ class TrendAggregatorService:
     Aggregates trending data from multiple platforms and normalizes it
     for unified scoring and analysis.
     """
-    
+
     def __init__(
         self,
-        google_service,  # GoogleTrendsService
-        tiktok_service,  # TikTokService
-        youtube_service  # YouTubeService
+        google_service: 'GoogleTrendsService',
+        tiktok_service: 'TikTokService',
+        youtube_service: 'YouTubeService'
     ):
         self.google_service = google_service
         self.tiktok_service = tiktok_service
