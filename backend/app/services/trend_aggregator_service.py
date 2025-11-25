@@ -55,6 +55,10 @@ class TrendAggregatorService:
         Returns:
             Dictionary containing all trends in normalized format
         """
+        logger.info("=" * 80)
+        logger.info(f"[AGGREGATOR] Starting trend aggregation")
+        logger.info(f"[AGGREGATOR] Input parameters: country_code='{country_code}', category={category}, max_results={max_results}, time_period='{time_period}'")
+
         all_trends = []
 
         # Map time_period to platform-specific parameters
@@ -82,6 +86,7 @@ class TrendAggregatorService:
 
         # Fetch from Google Trends
         try:
+            logger.info(f"[PLATFORM API] Calling Google Trends API with: country_code='{country_code}', category={category}, hours={google_hours}")
             google_trends = self.google_service.get_trending_now(
                 country_code=country_code,
                 category=category,
@@ -89,12 +94,13 @@ class TrendAggregatorService:
             )
             normalized_google = self._normalize_google_trends(google_trends)
             all_trends.extend(normalized_google)
-            logger.info(f"Aggregated {len(normalized_google)} Google Trends")
+            logger.info(f"[PLATFORM API] Google Trends returned {len(google_trends)} items → normalized to {len(normalized_google)} trends")
         except Exception as e:
-            logger.error(f"Error fetching Google Trends: {str(e)}")
+            logger.error(f"[PLATFORM API] Error fetching Google Trends: {str(e)}")
 
         # Fetch from YouTube
         try:
+            logger.info(f"[PLATFORM API] Calling YouTube API with: country_code='{country_code}', max_results={max_results}, category={category}, time_period_days={youtube_days}")
             youtube_videos = self.youtube_service.get_trending_videos(
                 country_code=country_code,
                 max_results=max_results,
@@ -103,9 +109,9 @@ class TrendAggregatorService:
             )
             normalized_youtube = self._normalize_youtube_trends(youtube_videos)
             all_trends.extend(normalized_youtube)
-            logger.info(f"Aggregated {len(normalized_youtube)} YouTube videos")
+            logger.info(f"[PLATFORM API] YouTube returned {len(youtube_videos)} items → normalized to {len(normalized_youtube)} trends")
         except Exception as e:
-            logger.error(f"Error fetching YouTube trends: {str(e)}")
+            logger.error(f"[PLATFORM API] Error fetching YouTube trends: {str(e)}")
 
         # Fetch from TikTok
         try:
@@ -118,12 +124,20 @@ class TrendAggregatorService:
             if category is not None:
                 tiktok_kwargs["category"] = category
 
+            logger.info(f"[PLATFORM API] Calling TikTok API with: {tiktok_kwargs}")
             tiktok_data = self.tiktok_service.get_trending_data(**tiktok_kwargs)
             normalized_tiktok = self._normalize_tiktok_trends(tiktok_data)
             all_trends.extend(normalized_tiktok)
-            logger.info(f"Aggregated {len(normalized_tiktok)} TikTok items")
+
+            tiktok_counts = {
+                'hashtags': len(tiktok_data.get('hashtags', [])),
+                'creators': len(tiktok_data.get('creators', [])),
+                'sounds': len(tiktok_data.get('sounds', [])),
+                'videos': len(tiktok_data.get('videos', []))
+            }
+            logger.info(f"[PLATFORM API] TikTok returned {tiktok_counts} → normalized to {len(normalized_tiktok)} trends")
         except Exception as e:
-            logger.error(f"Error fetching TikTok trends: {str(e)}")
+            logger.error(f"[PLATFORM API] Error fetching TikTok trends: {str(e)}")
 
         return {
             'trends': all_trends,

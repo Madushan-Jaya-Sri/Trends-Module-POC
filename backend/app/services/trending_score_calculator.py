@@ -106,10 +106,19 @@ class TrendingScoreCalculator:
         if not all_trends:
             return []
 
+        # Count trends by platform
+        platform_counts = {}
+        for trend in all_trends:
+            platform = trend.get('platform', 'unknown')
+            platform_counts[platform] = platform_counts.get(platform, 0) + 1
+
+        logger.info(f"[SCORING START] Processing {len(all_trends)} trends: {platform_counts}")
+
         # Pre-calculate max values for TikTok normalization
         self._calculate_tiktok_max_values(all_trends)
 
         # Calculate individual component scores
+        logger.info(f"[SCORING] Calculating raw component scores (volume, engagement, velocity, recency, cross-platform)...")
         for trend in all_trends:
             trend['volume_score'] = self._calculate_volume_score(trend)
             trend['engagement_score'] = self._calculate_engagement_score(trend)
@@ -126,8 +135,11 @@ class TrendingScoreCalculator:
         self._normalize_scores(all_trends, 'velocity_score')
         
         # Calculate final weighted score with PLATFORM-SPECIFIC WEIGHTS
+        logger.info(f"[FINAL SCORE] Calculating final weighted scores for {len(all_trends)} trends")
+
         for trend in all_trends:
             platform = trend.get('platform', '')
+            trend_name = trend.get('query') or trend.get('title') or trend.get('name', 'Unknown')
 
             # Choose weights based on platform
             if platform == 'google_trends':
@@ -206,18 +218,40 @@ class TrendingScoreCalculator:
                     'recency': 0.15,
                     'cross_platform': 0.10
                 }
-            
+
             # Calculate weighted score
+            vol_contribution = weights['volume'] * trend['volume_score']
+            eng_contribution = weights['engagement'] * trend['engagement_score']
+            vel_contribution = weights['velocity'] * trend['velocity_score']
+            rec_contribution = weights['recency'] * trend['recency_score']
+            cross_contribution = weights['cross_platform'] * trend['cross_platform_score']
+
             trend['trending_score'] = (
-                weights['volume'] * trend['volume_score'] +
-                weights['engagement'] * trend['engagement_score'] +
-                weights['velocity'] * trend['velocity_score'] +
-                weights['recency'] * trend['recency_score'] +
-                weights['cross_platform'] * trend['cross_platform_score']
+                vol_contribution +
+                eng_contribution +
+                vel_contribution +
+                rec_contribution +
+                cross_contribution
             )
-            
+
             # Round to 2 decimal places
             trend['trending_score'] = round(trend['trending_score'], 2)
+
+            # Log the calculation details
+            platform_label = f"{platform.replace('_', ' ').title()}"
+            if platform == 'tiktok':
+                entity_type = trend.get('entity_type', '')
+                platform_label += f" {entity_type.capitalize()}"
+
+            logger.debug(
+                f"[FINAL SCORE] {platform_label} '{trend_name}': "
+                f"vol={trend['volume_score']:.2f}×{weights['volume']:.2f}={vol_contribution:.2f}, "
+                f"eng={trend['engagement_score']:.2f}×{weights['engagement']:.2f}={eng_contribution:.2f}, "
+                f"vel={trend['velocity_score']:.2f}×{weights['velocity']:.2f}={vel_contribution:.2f}, "
+                f"rec={trend['recency_score']:.2f}×{weights['recency']:.2f}={rec_contribution:.2f}, "
+                f"cross={trend['cross_platform_score']:.2f}×{weights['cross_platform']:.2f}={cross_contribution:.2f} "
+                f"→ TRENDING_SCORE={trend['trending_score']:.2f}"
+            )
 
             # Add score breakdown showing percentage of total (0-100 scale)
             # These scores represent the proportion of the total for each metric
@@ -233,9 +267,25 @@ class TrendingScoreCalculator:
 
             # Add platform-specific weights used
             trend['weights_used'] = weights
-        
+
         # Sort by trending score (descending)
         all_trends.sort(key=lambda x: x['trending_score'], reverse=True)
+
+        # Log summary of top trends
+        logger.info(f"[SCORING COMPLETE] Sorted {len(all_trends)} trends by trending_score")
+        if all_trends:
+            top_5 = all_trends[:min(5, len(all_trends))]
+            logger.info(f"[TOP TRENDS] Top {len(top_5)} trends:")
+            for i, trend in enumerate(top_5, 1):
+                trend_name = trend.get('query') or trend.get('title') or trend.get('name', 'Unknown')
+                platform = trend.get('platform', 'unknown').replace('_', ' ').title()
+                if trend.get('platform') == 'tiktok':
+                    platform += f" {trend.get('entity_type', '').capitalize()}"
+                logger.info(
+                    f"  #{i} [{platform}] '{trend_name}' - Score: {trend['trending_score']:.2f} "
+                    f"(vol={trend['volume_score']:.1f}, eng={trend['engagement_score']:.1f}, "
+                    f"vel={trend['velocity_score']:.1f}, rec={trend['recency_score']:.1f})"
+                )
 
         return all_trends
 
@@ -292,60 +342,78 @@ class TrendingScoreCalculator:
     def _calculate_volume_score(self, trend: Dict[str, Any]) -> float:
         """
         Calculate volume score based on raw reach metrics.
-        
+
         Platform-specific metrics:
         - Google Trends: search_volume (boosted by 100x to compensate for scale)
         - YouTube: viewCount
         - TikTok: viewCount (for hashtags), followerCount (for creators)
-        
+
         Returns raw score (will be normalized later)
         """
         platform = trend.get('platform', '')
-        
+        trend_name = trend.get('query') or trend.get('title') or trend.get('name', 'Unknown')
+
         if platform == 'google_trends':
             # Google Trends search volumes are typically 1K-500K
             # YouTube/TikTok views are 100K-10M
             # Multiply by 100 to bring to similar scale
             search_volume = float(trend.get('search_volume', 0))
-            return search_volume * 100  # BOOST FACTOR
-        
+            volume_score = search_volume * 100  # BOOST FACTOR
+            logger.debug(f"[VOLUME] Google Trends '{trend_name}': search_volume={search_volume:,.0f} → score={volume_score:,.2f} (boosted 100x)")
+            return volume_score
+
         elif platform == 'youtube':
-            return float(trend.get('viewCount', 0))
-        
+            view_count = float(trend.get('viewCount', 0))
+            logger.debug(f"[VOLUME] YouTube '{trend_name}': viewCount={view_count:,.0f} → score={view_count:,.2f}")
+            return view_count
+
         elif platform == 'tiktok':
             entity_type = trend.get('entity_type', '')
             if entity_type == 'hashtag':
-                return float(trend.get('viewCount', 0))
+                view_count = float(trend.get('viewCount', 0))
+                logger.debug(f"[VOLUME] TikTok Hashtag '{trend_name}': viewCount={view_count:,.0f} → score={view_count:,.2f}")
+                return view_count
             elif entity_type == 'creator':
                 # Followers are more stable than views
-                return float(trend.get('followerCount', 0)) * 10  # Weight up slightly
+                follower_count = float(trend.get('followerCount', 0))
+                volume_score = follower_count * 10  # Weight up slightly
+                logger.debug(f"[VOLUME] TikTok Creator '{trend_name}': followerCount={follower_count:,.0f} → score={volume_score:,.2f} (weighted 10x)")
+                return volume_score
             elif entity_type == 'sound':
-                return float(trend.get('rank', 0))  # Approximate from related data
+                rank = float(trend.get('rank', 0))
+                logger.debug(f"[VOLUME] TikTok Sound '{trend_name}': rank={rank} → score={rank:.2f}")
+                return rank
             elif entity_type == 'video':
-                return float(trend.get('rank', 0))
-        
+                rank = float(trend.get('rank', 0))
+                logger.debug(f"[VOLUME] TikTok Video '{trend_name}': rank={rank} → score={rank:.2f}")
+                return rank
+
+        logger.debug(f"[VOLUME] Unknown platform '{platform}' for '{trend_name}' → score=0.0")
         return 0.0
     
     def _calculate_engagement_score(self, trend: Dict[str, Any]) -> float:
         """
         Calculate engagement score based on interaction quality.
-        
+
         Higher engagement rate = more genuine interest.
         Considers likes, comments, shares relative to views.
-        
+
         Returns raw score (will be normalized later with dynamic scaling)
         """
         platform = trend.get('platform', '')
-        
+        trend_name = trend.get('query') or trend.get('title') or trend.get('name', 'Unknown')
+
         if platform == 'google_trends':
             # For Google Trends, use increase_percentage as proxy for engagement
             # Return raw value - will be scaled dynamically later
             increase_pct = trend.get('increase_percentage', 0)
+            logger.debug(f"[ENGAGEMENT] Google Trends '{trend_name}': increase_pct={increase_pct}% → score={increase_pct:.2f}")
             return float(increase_pct)  # Return raw value
-        
+
         elif platform == 'youtube':
             views = trend.get('viewCount', 0)
             if views == 0:
+                logger.debug(f"[ENGAGEMENT] YouTube '{trend_name}': viewCount=0 → score=0.0 (no views)")
                 return 0.0
 
             likes = trend.get('likeCount', 0)
@@ -360,6 +428,10 @@ class TrendingScoreCalculator:
             # Multiply by 1M to get 20,000-50,000 range
             engagement_score = engagement_rate * 1_000_000
 
+            logger.debug(
+                f"[ENGAGEMENT] YouTube '{trend_name}': views={views:,.0f}, likes={likes:,.0f}, comments={comments:,.0f} "
+                f"→ rate={engagement_rate:.4f} ({engagement_rate*100:.2f}%) → score={engagement_score:,.2f}"
+            )
             return engagement_score
         
         elif platform == 'tiktok':
@@ -394,28 +466,43 @@ class TrendingScoreCalculator:
                     (0.10 * momentum_norm)
                 )
 
+                logger.debug(
+                    f"[ENGAGEMENT] TikTok Hashtag '{trend_name}': views={view_count:,.0f} (norm={view_norm:.4f}), "
+                    f"videos={video_count:,.0f} (norm={video_norm:.4f}), rank={rank} (norm={rank_norm:.4f}), "
+                    f"momentum={momentum_norm:.4f} → score={engagement_score:.4f}"
+                )
                 return engagement_score
 
             elif entity_type == 'creator':
                 liked_count = trend.get('likedCount', 0)
                 follower_count = trend.get('followerCount', 1)
                 # Likes per follower ratio
-                return (liked_count / follower_count) * 100
-            
+                engagement_score = (liked_count / follower_count) * 100
+                logger.debug(
+                    f"[ENGAGEMENT] TikTok Creator '{trend_name}': likes={liked_count:,.0f}, followers={follower_count:,.0f} "
+                    f"→ ratio={liked_count/follower_count:.4f} → score={engagement_score:.2f}"
+                )
+                return engagement_score
+
             elif entity_type == 'sound':
                 # Use rank normalization (lower rank = better engagement)
                 rank = float(trend.get('rank', self.max_sound_rank))
                 # rank_norm = 1 - (rank / max_rank)
                 rank_norm = 1 - (rank / self.max_sound_rank)
-                return rank_norm * 100  # Scale to 0-100
+                engagement_score = rank_norm * 100  # Scale to 0-100
+                logger.debug(f"[ENGAGEMENT] TikTok Sound '{trend_name}': rank={rank} (norm={rank_norm:.4f}) → score={engagement_score:.2f}")
+                return engagement_score
 
             elif entity_type == 'video':
                 # Use rank normalization (lower rank = better engagement)
                 rank = float(trend.get('rank', self.max_video_rank))
                 # rank_norm = 1 - (rank / max_rank)
                 rank_norm = 1 - (rank / self.max_video_rank)
-                return rank_norm * 100  # Scale to 0-100
-        
+                engagement_score = rank_norm * 100  # Scale to 0-100
+                logger.debug(f"[ENGAGEMENT] TikTok Video '{trend_name}': rank={rank} (norm={rank_norm:.4f}) → score={engagement_score:.2f}")
+                return engagement_score
+
+        logger.debug(f"[ENGAGEMENT] Unknown platform '{platform}' for '{trend_name}' → score=0.0")
         return 0.0
     
     def _normalize_engagement_scores(self, trends: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -464,32 +551,39 @@ class TrendingScoreCalculator:
     def _calculate_velocity_score(self, trend: Dict[str, Any]) -> float:
         """
         Calculate velocity score based on growth speed.
-        
+
         Fast growth indicates viral potential and emerging trends.
         Uses trending histogram or increase percentage.
-        
+
         Returns raw score (will be normalized later)
         """
         platform = trend.get('platform', '')
-        
+        trend_name = trend.get('query') or trend.get('title') or trend.get('name', 'Unknown')
+
         if platform == 'google_trends':
             # Use a combination of increase_percentage and active status
             increase_pct = float(trend.get('increase_percentage', 0))
-            
+
             # If trend is currently active, boost velocity
             is_active = trend.get('active', True)
             active_multiplier = 1.5 if is_active else 1.0
-            
+
             # Calculate velocity based on increase % and activity
             # Multiply by 30 and apply active multiplier
             velocity = increase_pct * 30 * active_multiplier  # BOOST FACTOR
-            
+
             # Bonus for very high increase percentages (1000%+)
+            viral_bonus = ""
             if increase_pct >= 1000:
                 velocity *= 1.2  # Extra 20% boost for viral trends
-            
+                viral_bonus = " +20% viral bonus"
+
+            logger.debug(
+                f"[VELOCITY] Google Trends '{trend_name}': increase_pct={increase_pct}%, active={is_active} "
+                f"(multiplier={active_multiplier}x) → score={velocity:,.2f}{viral_bonus}"
+            )
             return velocity
-        
+
         elif platform == 'youtube':
             # For YouTube, calculate velocity from views/publish time
             views = trend.get('viewCount', 0)
@@ -509,6 +603,11 @@ class TrendingScoreCalculator:
 
                     # Combined velocity with weighted average
                     velocity = (view_velocity * 0.7) + (engagement_velocity * 0.3)
+                    logger.debug(
+                        f"[VELOCITY] YouTube '{trend_name}': {hours_since_publish:.1f}h old, "
+                        f"view_vel={view_velocity:,.1f}/h (70%), eng_vel={engagement_velocity:,.1f}/h (30%) "
+                        f"→ score={velocity:,.2f}"
+                    )
                     return velocity
                 except:
                     pass
@@ -516,7 +615,9 @@ class TrendingScoreCalculator:
             # Fallback: assume 24 hours if no timestamp
             view_velocity = float(views) / 24
             engagement_velocity = float(likes + comments) / 24
-            return (view_velocity * 0.7) + (engagement_velocity * 0.3)
+            velocity = (view_velocity * 0.7) + (engagement_velocity * 0.3)
+            logger.debug(f"[VELOCITY] YouTube '{trend_name}': no timestamp, assuming 24h → score={velocity:,.2f}")
+            return velocity
         
         elif platform == 'tiktok':
             entity_type = trend.get('entity_type', '')
@@ -566,6 +667,11 @@ class TrendingScoreCalculator:
                             (0.20 * posting_frequency * 100000)  # Scale up posting frequency
                         )
 
+                        logger.debug(
+                            f"[VELOCITY] TikTok Creator '{trend_name}': {len(related_videos)} videos over {time_span:.1f} days, "
+                            f"views/day={views_per_day:,.1f} (50%), likes/day={likes_per_day:,.1f} (30%), "
+                            f"posting_freq={posting_frequency:.2f}/day (20%) → score={velocity:,.2f}"
+                        )
                         return velocity
 
             # For hashtags, sounds, videos - use trending histogram
@@ -577,31 +683,40 @@ class TrendingScoreCalculator:
                 last_val = histogram[-1].get('value', 0)
 
                 growth_rate = last_val - first_val
-                return max(0, growth_rate) * 100  # Scale up
+                velocity = max(0, growth_rate) * 100  # Scale up
+                logger.debug(
+                    f"[VELOCITY] TikTok {entity_type.capitalize()} '{trend_name}': histogram growth={first_val}→{last_val} "
+                    f"(rate={growth_rate}) → score={velocity:,.2f}"
+                )
+                return velocity
 
             # Fallback: use rank (lower = faster growing)
             rank = trend.get('rank', 100)
-            return (100 - rank) * 10
-        
+            velocity = (100 - rank) * 10
+            logger.debug(f"[VELOCITY] TikTok {entity_type.capitalize()} '{trend_name}': rank={rank} → score={velocity:.2f} (fallback)")
+            return velocity
+
+        logger.debug(f"[VELOCITY] Unknown platform '{platform}' for '{trend_name}' → score=0.0")
         return 0.0
     
     def _calculate_recency_score(self, trend: Dict[str, Any]) -> float:
         """
         Calculate recency score using exponential decay.
-        
+
         Formula: score = 100 * (0.5)^(age_hours / half_life)
-        
+
         This ensures:
         - Content from 1 hour ago: ~97 score
         - Content from 24 hours ago: 50 score
         - Content from 48 hours ago: 25 score
         - Content from 1 week ago: ~1.5 score
-        
+
         Returns score from 0-100 (already normalized)
         """
         platform = trend.get('platform', '')
+        trend_name = trend.get('query') or trend.get('title') or trend.get('name', 'Unknown')
         timestamp = None
-        
+
         if platform == 'google_trends':
             timestamp = trend.get('start_timestamp')
         elif platform == 'youtube':
@@ -642,19 +757,33 @@ class TrendingScoreCalculator:
                         timestamp = datetime.fromisoformat(date_str.replace('Z', '+00:00')).timestamp()
                     except:
                         pass
-        
+
         if not timestamp:
             # No timestamp available, assume recent (12 hours ago)
+            logger.debug(f"[RECENCY] {platform.replace('_', ' ').title()} '{trend_name}': no timestamp → score=70.0 (default)")
             return 70.0
-        
+
         # Calculate age in hours
         age_seconds = self.current_time.timestamp() - timestamp
         age_hours = max(0, age_seconds / 3600)
-        
+
         # Exponential decay formula
         decay_factor = age_hours / self.RECENCY_HALF_LIFE_HOURS
         recency_score = 100 * math.pow(0.5, decay_factor)
-        
+
+        # Format age for display
+        if age_hours < 1:
+            age_str = f"{age_hours*60:.0f}m"
+        elif age_hours < 24:
+            age_str = f"{age_hours:.1f}h"
+        else:
+            age_str = f"{age_hours/24:.1f}d"
+
+        logger.debug(
+            f"[RECENCY] {platform.replace('_', ' ').title()} '{trend_name}': age={age_str} "
+            f"(decay_factor={decay_factor:.2f}) → score={recency_score:.2f}"
+        )
+
         return max(0, min(100, recency_score))  # Clamp to 0-100
     
     def _calculate_cross_platform_score(
@@ -812,15 +941,20 @@ class TrendingScoreCalculator:
 
         scores = [t.get(score_key, 0) for t in trends]
         total_score = sum(scores)
+        min_score = min(scores) if scores else 0
+        max_score = max(scores) if scores else 0
+        avg_score = total_score / len(scores) if scores else 0
 
-        logger.info(f"Normalizing {score_key}: {len(trends)} trends, total={total_score:.4f}")
+        logger.info(f"[NORMALIZE] {score_key}: {len(trends)} trends")
+        logger.info(f"[NORMALIZE] {score_key} RAW VALUES: min={min_score:.2f}, max={max_score:.2f}, avg={avg_score:.2f}, total={total_score:.2f}")
 
         # Handle case where all scores are zero
         if total_score == 0:
-            logger.info(f"All {score_key} values are zero, setting all to equal distribution")
+            logger.info(f"[NORMALIZE] All {score_key} values are zero, setting all to equal distribution")
             equal_percentage = 100.0 / len(trends)
             for trend in trends:
                 trend[score_key] = equal_percentage
+            logger.info(f"[NORMALIZE] {score_key} RESULT: Each trend = {equal_percentage:.2f}%")
             return
 
         # Calculate percentage of total
@@ -833,12 +967,16 @@ class TrendingScoreCalculator:
 
         # Verify sum equals 100 (allowing for small floating point errors)
         total_percentage = sum(normalized_values)
+        min_pct = min(normalized_values) if normalized_values else 0
+        max_pct = max(normalized_values) if normalized_values else 0
+        avg_pct = total_percentage / len(normalized_values) if normalized_values else 0
 
         # Count how many trends have very high or very low percentages
         count_high = sum(1 for v in normalized_values if v > 10.0)
         count_low = sum(1 for v in normalized_values if v < 0.1)
 
-        logger.info(f"Normalized {score_key}: total={total_percentage:.2f}%, >10%: {count_high}, <0.1%: {count_low}")
+        logger.info(f"[NORMALIZE] {score_key} PERCENTAGES: min={min_pct:.2f}%, max={max_pct:.2f}%, avg={avg_pct:.2f}%, total={total_percentage:.2f}%")
+        logger.info(f"[NORMALIZE] {score_key} DISTRIBUTION: >10%: {count_high} trends, <0.1%: {count_low} trends")
 
     def calculate_platform_specific_scores(
         self,

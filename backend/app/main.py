@@ -38,7 +38,7 @@ from .models.schemas import (
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Changed to DEBUG to see detailed calculation logs
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
@@ -177,7 +177,9 @@ async def get_google_trends(
         if not google_trends_service:
             raise HTTPException(status_code=500, detail="Google Trends service not initialized")
 
-        logger.info(f"User {user.user_id} fetching Google Trends for country: {request.country_code}, category: {request.category}, time_period: {request.time_period}")
+        logger.info("=" * 80)
+        logger.info(f"[GOOGLE TRENDS ENDPOINT] Request from user {user.user_id}")
+        logger.info(f"[GOOGLE TRENDS ENDPOINT] Parameters: country={request.country_code}, category={request.category}, time_period={request.time_period}")
 
         # Map time_period to hours parameter
         hours = None
@@ -190,11 +192,14 @@ async def get_google_trends(
             }
             hours = time_period_map.get(request.time_period)
 
+        logger.info(f"[GOOGLE TRENDS ENDPOINT] Fetching trends from Google Trends API...")
         trends = google_trends_service.get_trending_now(
             country_code=request.country_code,
             category=request.category,
             hours=hours
         )
+
+        logger.info(f"[GOOGLE TRENDS ENDPOINT] Fetched {len(trends)} trends from API")
 
         # Calculate platform-specific trending scores for each item
         if trends:
@@ -204,14 +209,15 @@ async def get_google_trends(
                     trend['platform'] = 'google_trends'
 
                 # Calculate trending scores
+                logger.info(f"[GOOGLE TRENDS ENDPOINT] Calculating platform-specific trending scores...")
                 score_calculator = TrendingScoreCalculator()
                 trends = score_calculator.calculate_platform_specific_scores(
                     trends=trends,
                     platform='google_trends'
                 )
-                logger.info(f"Calculated trending scores for {len(trends)} Google Trends items")
+                logger.info(f"[GOOGLE TRENDS ENDPOINT] Scoring complete for {len(trends)} items")
             except Exception as score_error:
-                logger.warning(f"Failed to calculate trending scores: {str(score_error)}")
+                logger.warning(f"[GOOGLE TRENDS ENDPOINT] Failed to calculate trending scores: {str(score_error)}")
 
         # Store Google Trends items in MongoDB for future reference (async operation)
         if data_storage_service:
@@ -262,7 +268,9 @@ async def get_tiktok_trends(
         if not tiktok_service:
             raise HTTPException(status_code=500, detail="TikTok service not initialized")
 
-        logger.info(f"User {user.user_id} fetching TikTok trends for country: {request.country_code}, category: {request.category}, time_period: {request.time_period}")
+        logger.info("=" * 80)
+        logger.info(f"[TIKTOK ENDPOINT] Request from user {user.user_id}")
+        logger.info(f"[TIKTOK ENDPOINT] Parameters: country={request.country_code}, category={request.category}, time_period={request.time_period}, results_per_page={request.results_per_page}")
 
         # Map time_period to days parameter
         time_period_days = None
@@ -286,7 +294,10 @@ async def get_tiktok_trends(
         if request.category is not None:
             tiktok_kwargs["category"] = request.category
 
+        logger.info(f"[TIKTOK ENDPOINT] Fetching trends from TikTok API...")
         data = tiktok_service.get_trending_data(**tiktok_kwargs)
+
+        logger.info(f"[TIKTOK ENDPOINT] Fetched {len(data.get('hashtags', []))} hashtags, {len(data.get('creators', []))} creators, {len(data.get('sounds', []))} sounds, {len(data.get('videos', []))} videos")
 
         # Calculate platform-specific trending scores for all TikTok items
         try:
@@ -319,12 +330,13 @@ async def get_tiktok_trends(
 
             # Calculate trending scores for all items together
             if all_items:
+                logger.info(f"[TIKTOK ENDPOINT] Calculating platform-specific trending scores for {len(all_items)} items...")
                 score_calculator = TrendingScoreCalculator()
                 all_items = score_calculator.calculate_platform_specific_scores(
                     trends=all_items,
                     platform='tiktok'
                 )
-                logger.info(f"Calculated trending scores for {len(all_items)} TikTok items")
+                logger.info(f"[TIKTOK ENDPOINT] Scoring complete for {len(all_items)} items")
 
                 # Separate back into categories
                 data["hashtags"] = [item for item in all_items if item.get('entity_type') == 'hashtag']
@@ -333,7 +345,7 @@ async def get_tiktok_trends(
                 data["videos"] = [item for item in all_items if item.get('entity_type') == 'video']
 
         except Exception as score_error:
-            logger.warning(f"Failed to calculate trending scores for TikTok items: {str(score_error)}")
+            logger.warning(f"[TIKTOK ENDPOINT] Failed to calculate trending scores: {str(score_error)}")
 
         # Store TikTok items in MongoDB for future reference (async operation)
         if data_storage_service:
@@ -424,7 +436,9 @@ async def get_youtube_trends(
         if not youtube_service:
             raise HTTPException(status_code=500, detail="YouTube service not initialized")
 
-        logger.info(f"User {user.user_id} fetching YouTube trends for country: {request.country_code}, category: {request.category}, time_period: {request.time_period}")
+        logger.info("=" * 80)
+        logger.info(f"[YOUTUBE ENDPOINT] Request from user {user.user_id}")
+        logger.info(f"[YOUTUBE ENDPOINT] Parameters: country={request.country_code}, category={request.category}, time_period={request.time_period}, max_results={request.max_results}")
 
         # Map time_period to days parameter
         time_period_days = None
@@ -437,12 +451,15 @@ async def get_youtube_trends(
             }
             time_period_days = time_period_map.get(request.time_period)
 
+        logger.info(f"[YOUTUBE ENDPOINT] Fetching videos from YouTube API...")
         videos = youtube_service.get_trending_videos(
             country_code=request.country_code,
             max_results=request.max_results,
             category=request.category,
             time_period_days=time_period_days
         )
+
+        logger.info(f"[YOUTUBE ENDPOINT] Fetched {len(videos)} videos from API")
 
         # Calculate platform-specific trending scores for each video
         if videos:
@@ -452,14 +469,15 @@ async def get_youtube_trends(
                     video['platform'] = 'youtube'
 
                 # Calculate trending scores
+                logger.info(f"[YOUTUBE ENDPOINT] Calculating platform-specific trending scores...")
                 score_calculator = TrendingScoreCalculator()
                 videos = score_calculator.calculate_platform_specific_scores(
                     trends=videos,
                     platform='youtube'
                 )
-                logger.info(f"Calculated trending scores for {len(videos)} YouTube videos")
+                logger.info(f"[YOUTUBE ENDPOINT] Scoring complete for {len(videos)} videos")
             except Exception as score_error:
-                logger.warning(f"Failed to calculate trending scores: {str(score_error)}")
+                logger.warning(f"[YOUTUBE ENDPOINT] Failed to calculate trending scores: {str(score_error)}")
 
         # Store YouTube videos in MongoDB for future reference (async operation)
         if data_storage_service:
@@ -521,12 +539,12 @@ async def get_unified_trends(
         if not trend_aggregator_service:
             raise HTTPException(status_code=500, detail="Trend aggregator service not initialized")
 
-        logger.info(
-            f"User {user.user_id} fetching unified trends for country: {request.country_code}, "
-            f"category: {request.category}, time_range: {request.time_range}"
-        )
+        logger.info("=" * 80)
+        logger.info(f"[UNIFIED ENDPOINT] Request from user {user.user_id}")
+        logger.info(f"[UNIFIED ENDPOINT] Parameters: country={request.country_code}, category={request.category}, time_range={request.time_range}, limit={request.limit}")
 
         # Step 1: Aggregate data from all platforms with optimized pre-filtering
+        logger.info(f"[UNIFIED ENDPOINT] Step 1: Aggregating data from all platforms...")
         aggregated_data = trend_aggregator_service.aggregate_all_trends(
             country_code=request.country_code,
             category=request.category,
@@ -537,15 +555,19 @@ async def get_unified_trends(
         trends = aggregated_data['trends']
         platform_counts = aggregated_data['platform_counts']
 
-        logger.info(f"Aggregated {len(trends)} trends from all platforms (with pre-filtering)")
+        logger.info(f"[UNIFIED ENDPOINT] Aggregated {len(trends)} trends: {platform_counts}")
 
         # Step 2: Calculate universal trending scores
+        logger.info(f"[UNIFIED ENDPOINT] Step 2: Calculating universal trending scores...")
         scored_trends = trend_aggregator_service.calculate_trending_scores(trends)
-        
-        logger.info("Calculated trending scores for all items")
+
+        logger.info(f"[UNIFIED ENDPOINT] Scoring complete for {len(scored_trends)} items")
 
         # Step 3: Limit to top N results
+        logger.info(f"[UNIFIED ENDPOINT] Step 3: Selecting top {request.limit} trends...")
         top_trends = scored_trends[:request.limit]
+
+        logger.info(f"[UNIFIED ENDPOINT] Returning {len(top_trends)} top trends (out of {len(scored_trends)} total)")
 
         # Step 4: Prepare metadata for response
         for trend in top_trends:
